@@ -5,8 +5,12 @@ import { NotFoundException, ConflictException } from '../validations/groups.vali
 const groupService = GroupService();
 
 export const getAllGroupsController = async (req, res) => {
+  const { userId } = req.query;
+  if (!userId) {
+    return res.status(StatusCodes.BAD_REQUEST).json({ message: 'El parámetro userId es requerido' });
+  }
   try {
-    const groups = await groupService.getAll();
+    const groups = await groupService.getAll(userId);
     res.status(StatusCodes.OK).json(groups);
   } catch (error) {
     console.error('Failed to get groups:', error);

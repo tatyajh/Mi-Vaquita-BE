@@ -17,8 +17,13 @@ const GroupService = () => {
     return groupModel.createGroupsModel(newGroup);
   };
 
-  const getAll = async () => {
-    return groupModel.getAllGroupsModel();
+  const getAll = async (userId) => {
+    if (!userId) {
+      // Sin userId no hay forma de saber qué grupos le pertenecen al
+      // usuario, así que no devolvemos todos los grupos de la BD.
+      throw new Error('Se requiere el id del usuario para listar sus grupos');
+    }
+    return groupModel.getGroupsForUserModel(userId);
   };
 
   const getById = async (id) => {

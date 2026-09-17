@@ -9,6 +9,23 @@ const GroupsModel = () => {
     return result.rows;
   };
 
+  // Solo los grupos que el usuario posee o de los que es participante.
+  const getGroupsForUserModel = async (userId) => {
+    const client = await pool.connect();
+    try {
+      const result = await client.query(
+        `SELECT DISTINCT g.* FROM Groups g
+         LEFT JOIN GroupParticipants gp ON gp.group_id = g.id
+         WHERE g.owneruserid = $1 OR gp.user_id = $1
+         ORDER BY g.createdat DESC`,
+        [userId]
+      );
+      return result.rows;
+    } finally {
+      client.release();
+    }
+  };
+
   const getByIdGroupsModel = async (id) => {
     const client = await pool.connect();
     const result = await client.query("SELECT * FROM Groups WHERE ID = $1", [id]);
@@ -75,6 +92,7 @@ const GroupsModel = () => {
 
   return {
     getAllGroupsModel,
+    getGroupsForUserModel,
     getByIdGroupsModel,
     createGroupsModel,
     updateGroupsModel,
