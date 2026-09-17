@@ -1,5 +1,7 @@
 import GroupsModel from "../database/groups.model.js";
-import { NotFoundException, validateGroup } from "../validations/groups.validations.js";
+import { NotFoundException, ConflictException, validateGroup } from "../validations/groups.validations.js";
+
+const MAX_GROUP_MEMBERS = 20;
 
 const GroupService = () => {
   const groupModel = GroupsModel();
@@ -50,6 +52,29 @@ const GroupService = () => {
   };
 
   const addParticipants = async (groupId, participantIds) => {
+    if (!Array.isArray(participantIds) || participantIds.length === 0) {
+      throw new Error('Debe indicar al menos un participante');
+    }
+
+    const [group, existingParticipants] = await Promise.all([
+      groupModel.getByIdGroupsModel(groupId),
+      groupModel.getParticipants(groupId),
+    ]);
+    if (!group) {
+      throw new NotFoundException(`Group with id ${groupId} does not exist`);
+    }
+
+    const existingIds = new Set(existingParticipants.map(p => p.id));
+    existingIds.add(group.owneruserid ?? group.ownerUserId);
+    const newIds = [...new Set(participantIds)].filter(id => !existingIds.has(id));
+    const totalMembers = existingIds.size + newIds.length;
+
+    if (totalMembers > MAX_GROUP_MEMBERS) {
+      throw new ConflictException(
+        `Un grupo puede tener como máximo ${MAX_GROUP_MEMBERS} integrantes (actualmente tendría ${totalMembers})`
+      );
+    }
+
     return groupModel.addParticipants(groupId, participantIds);
   };
 

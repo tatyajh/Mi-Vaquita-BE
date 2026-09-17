@@ -72,8 +72,11 @@ export const addGroupParticipantsController = async (req, res) => {
     await groupService.addParticipants(groupId, participantIds);
     res.status(StatusCodes.CREATED).json({ message: 'Participants added successfully' });
   } catch (error) {
+    if (error instanceof ConflictException || error instanceof NotFoundException) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
     console.error('Error adding participants:', error);
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: 'Internal server error' });
+    res.status(StatusCodes.BAD_REQUEST).json({ message: error.message || 'Internal server error' });
   }
 };
 
