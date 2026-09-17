@@ -15,3 +15,5 @@ yarn.lock
 # Ignore dist directories or built output
 dist/
 build/
+.vercel
+.env*
