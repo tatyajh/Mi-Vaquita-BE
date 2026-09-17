@@ -44,6 +44,17 @@ const queries = [
     CONSTRAINT fk_group_participants_groups_id FOREIGN KEY(group_id) REFERENCES Groups(id),
     CONSTRAINT fk_group_participants_users_id FOREIGN KEY(user_id) REFERENCES Users(id)
   );`,
+  `CREATE TABLE IF NOT EXISTS Expenses (
+    id SERIAL,
+    group_id INTEGER NOT NULL,
+    paid_by_user_id INTEGER NOT NULL,
+    description VARCHAR(200) NOT NULL,
+    amount NUMERIC(12, 2) NOT NULL,
+    createdAt TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY(id),
+    CONSTRAINT fk_expenses_group_id FOREIGN KEY(group_id) REFERENCES Groups(id),
+    CONSTRAINT fk_expenses_paid_by_user_id FOREIGN KEY(paid_by_user_id) REFERENCES Users(id)
+  );`,
 ];
 
 // Los grupos referencian usuarios por posición (1 = miguel, 2 = juan
