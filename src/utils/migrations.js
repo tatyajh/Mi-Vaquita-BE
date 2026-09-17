@@ -78,18 +78,27 @@ async function runMigrations() {
     await client.query(query);
   }
 
-  // Datos de ejemplo solo la primera vez — repetir la migración no
-  // debe duplicar usuarios ni grupos.
-  const { rows } = await client.query('SELECT COUNT(*)::int AS count FROM Users');
-  if (rows[0].count === 0) {
-    for (const user of SEED_USERS) {
-      const password = await bcrypt.hash('password', 10);
-      await client.query(
-        'INSERT INTO Users (name, email, password, createdAt) VALUES ($1, $2, $3, $4)',
-        [user.name, user.email, password, user.createdAt]
-      );
+  // Los datos de ejemplo (usuarios y grupos demo) son SOLO para
+  // desarrollo local. Nunca deben insertarse automáticamente en
+  // producción ni en ningún ambiente por defecto: hay que pedirlo
+  // explícitamente con SEED_DEMO_DATA=true. Esto es lo que evita que
+  // vuelvan a aparecer usuarios/grupos hardcodeados (p.ej. "miguel",
+  // "Los 4 babies", "Paseo san andrés", etc.) después de borrarlos.
+  const shouldSeed = process.env.SEED_DEMO_DATA === 'true' && process.env.NODE_ENV !== 'production';
+  if (shouldSeed) {
+    const { rows } = await client.query('SELECT COUNT(*)::int AS count FROM Users');
+    if (rows[0].count === 0) {
+      for (const user of SEED_USERS) {
+        const password = await bcrypt.hash('password', 10);
+        await client.query(
+          'INSERT INTO Users (name, email, password, createdAt) VALUES ($1, $2, $3, $4)',
+          [user.name, user.email, password, user.createdAt]
+        );
+      }
+      await client.query(GROUP_SEED_QUERY);
     }
-    await client.query(GROUP_SEED_QUERY);
+  } else {
+    console.log('Seeding de datos demo omitido (SEED_DEMO_DATA no está en "true", o NODE_ENV es production).');
   }
 
   console.log("Migrations ran successfully");
