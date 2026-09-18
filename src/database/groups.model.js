@@ -35,12 +35,23 @@ const GroupsModel = () => {
 
   const createGroupsModel = async (data) => {
     const client = await pool.connect();
-    const result = await client.query(
-      "INSERT INTO Groups (owneruserid, name, color, CREATEDAT) VALUES ($1, $2, $3, NOW()) RETURNING *",
-      [data.ownerUserId, data.name, data.color]
-    );
-    client.release();
-    return result.rows[0];
+    try {
+      const result = await client.query(
+        "INSERT INTO Groups (owneruserid, name, color, CREATEDAT) VALUES ($1, $2, $3, NOW()) RETURNING *",
+        [data.ownerUserId, data.name, data.color]
+      );
+      const group = result.rows[0];
+      // El dueño también es un participante del grupo desde el
+      // arranque (así aparece consistentemente en GroupParticipants,
+      // no solo por caso especial en las queries que lo necesitan).
+      await client.query(
+        "INSERT INTO GroupParticipants (group_id, user_id) VALUES ($1, $2)",
+        [group.id, data.ownerUserId]
+      );
+      return group;
+    } finally {
+      client.release();
+    }
   };
 
   const updateGroupsModel = async (id, data) => {
