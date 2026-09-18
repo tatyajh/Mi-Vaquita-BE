@@ -66,9 +66,23 @@ const GroupsModel = () => {
 
   const deleteGroupsModel = async (id) => {
     const client = await pool.connect();
-    const result = await client.query("DELETE FROM Groups WHERE id = $1", [id]);
-    client.release();
-    return result.rowCount >= 1;
+    try {
+      await client.query('BEGIN');
+      // Borrar primero lo que depende del grupo por foreign key
+      // (Expenses, GroupParticipants) — si no, el DELETE de Groups
+      // viola la constraint apenas el grupo tiene un gasto o un
+      // participante (que ahora siempre incluye al menos al dueño).
+      await client.query('DELETE FROM Expenses WHERE group_id = $1', [id]);
+      await client.query('DELETE FROM GroupParticipants WHERE group_id = $1', [id]);
+      const result = await client.query('DELETE FROM Groups WHERE id = $1', [id]);
+      await client.query('COMMIT');
+      return result.rowCount >= 1;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   };
 
   const addParticipants = async (groupId, participantIds) => {
