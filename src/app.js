@@ -1,6 +1,11 @@
 import express from 'express';
 import cors from 'cors';
-import groupRoutes from './routes/groups.router.js'; 
+// Side-effect import: runs the idempotent CREATE TABLE/ALTER TABLE
+// statements in migrations.js on boot. Nothing in the codebase
+// imported this file before, so none of its migrations (including
+// prior fixes to the Friends table) ever actually ran in production.
+import './utils/migrations.js';
+import groupRoutes from './routes/groups.router.js';
 import userRoutes from './routes/users.router.js';
 import authRoutes from './routes/auth.router.js'; 
 import friendRoutes from './routes/friends.router.js';
