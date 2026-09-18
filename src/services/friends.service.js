@@ -1,4 +1,5 @@
 import FriendsModel from '../database/friends.model.js';
+import { ConflictException } from '../validations/friends.validations.js';
 
 const FriendsService = () => {
   const friendsModel = FriendsModel();
@@ -10,7 +11,7 @@ const FriendsService = () => {
   const addFriend = async (userId, friendUserId) => {
     const existingFriend = await friendsModel.getByUserIdAndFriendUserId(userId, friendUserId);
     if (existingFriend) {
-      throw new Error('Friend already exists');
+      throw new ConflictException('Friend already exists');
     }
     return friendsModel.createFriendsModel({ userId, friendUserId });
   };
