@@ -45,6 +45,13 @@ const queries = [
   // bases de datos donde Friends ya existía con el esquema viejo.
   `ALTER TABLE Friends ADD COLUMN IF NOT EXISTS user_id INTEGER;`,
   `ALTER TABLE Friends ADD COLUMN IF NOT EXISTS friend_user_id INTEGER;`,
+  // name/email eran NOT NULL del diseño original (guardar el contacto
+  // suelto), pero createFriendsModel solo llena user_id/friend_user_id
+  // y getAllFriendsModel ya trae name/email vía JOIN a users — por eso
+  // el insert violaba NOT NULL y tiraba 500. Se quita la restricción
+  // porque esas columnas ya no se usan para la relación.
+  `ALTER TABLE Friends ALTER COLUMN name DROP NOT NULL;`,
+  `ALTER TABLE Friends ALTER COLUMN email DROP NOT NULL;`,
   `CREATE TABLE IF NOT EXISTS GroupParticipants (
     id SERIAL,
     group_id INTEGER NOT NULL,
