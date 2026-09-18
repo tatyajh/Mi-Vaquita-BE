@@ -36,6 +36,15 @@ const queries = [
     createdAt DATE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(id)
   );`,
+  // Friends nunca tuvo columnas para relacionar dos usuarios entre sí
+  // (solo guardaba name/email sueltos), pero friends.model.js sí
+  // asume una relación user_id/friend_user_id (de ahí el error
+  // "column userid does not exist" en producción). Se agregan acá de
+  // forma idempotente, siguiendo la convención snake_case ya usada
+  // por GroupParticipants/Expenses, para que también se apliquen en
+  // bases de datos donde Friends ya existía con el esquema viejo.
+  `ALTER TABLE Friends ADD COLUMN IF NOT EXISTS user_id INTEGER;`,
+  `ALTER TABLE Friends ADD COLUMN IF NOT EXISTS friend_user_id INTEGER;`,
   `CREATE TABLE IF NOT EXISTS GroupParticipants (
     id SERIAL,
     group_id INTEGER NOT NULL,

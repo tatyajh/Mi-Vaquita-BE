@@ -10,7 +10,7 @@ export const getFriendsController = async (req, res) => {
     res.status(StatusCodes.OK).json(friends);
   } catch (error) {
     console.error('Error getting friends:', error);
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: `Internal server error: ${error.message}` });
+    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ error: 'Ocurrió un error. Intenta de nuevo.' });
   }
 };
 
@@ -28,7 +28,7 @@ export const addFriendController = async (req, res) => {
       return res.status(StatusCodes.CONFLICT).json({ message: 'Ya son amigos' });
     }
     console.error('Error adding friend:', error);
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: `Internal server error: ${error.message}` });
+    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ error: 'Ocurrió un error. Intenta de nuevo.' });
   }
 };
 
@@ -42,6 +42,6 @@ export const deleteFriendController = async (req, res) => {
     res.status(StatusCodes.NO_CONTENT).send();
   } catch (error) {
     console.error('Error deleting friend:', error);
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: `Internal server error: ${error.message}` });
+    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ error: 'Ocurrió un error. Intenta de nuevo.' });
   }
 };
