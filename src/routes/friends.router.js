@@ -5,6 +5,6 @@ const router = Router();
 
 router.get('/', getFriendsController);
 router.post('/addFriend', addFriendController);
-router.post('/deleteFriend', deleteFriendController);
+router.delete('/deleteFriend/:friendId', deleteFriendController);
 
 export default router;
