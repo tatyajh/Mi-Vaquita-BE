@@ -119,7 +119,12 @@ async function runMigrations() {
 
   console.log("Migrations ran successfully");
   client.release();
-  await pool.end();
+  // No cerrar el pool acá: este archivo ahora se importa desde
+  // app.js al arrancar el servidor (antes era un script standalone,
+  // por eso cerraba el pool al final). Si se cierra, cualquier
+  // request que use el pool compartido de connection.js después de
+  // este boot falla con "Cannot use a pool after calling end on the
+  // pool" — el pool debe vivir mientras viva el servidor.
 }
 
 runMigrations().catch(console.error);
