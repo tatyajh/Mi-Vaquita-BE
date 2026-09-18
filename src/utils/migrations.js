@@ -75,6 +75,14 @@ const queries = [
   // pública (subida a un storage externo); si no hay integración de
   // storage configurada, el gasto se guarda igual con receipt_url NULL.
   `ALTER TABLE Expenses ADD COLUMN IF NOT EXISTS receipt_url VARCHAR(500);`,
+  // Medio de pago: solo informativo (efectivo/transferencia/tarjeta),
+  // no procesa pagos reales.
+  `ALTER TABLE Expenses ADD COLUMN IF NOT EXISTS payment_method VARCHAR(20);`,
+  // Categoría manual del gasto (comida, transporte, hospedaje, etc.).
+  `ALTER TABLE Expenses ADD COLUMN IF NOT EXISTS category VARCHAR(30);`,
+  // Tipo de paseo del grupo (playa, montaña, ciudad...), usado para
+  // filtrar los consejos de ahorro contextuales.
+  `ALTER TABLE Groups ADD COLUMN IF NOT EXISTS trip_type VARCHAR(30);`,
 ];
 
 // Los grupos referencian usuarios por posición (1 = miguel, 2 = juan

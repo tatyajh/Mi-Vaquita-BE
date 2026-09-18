@@ -29,10 +29,10 @@ export const getByIdGroupsController = async (req, res) => {
 };
 
 export const createGroupsController = async (req, res) => {
-  const { name, color } = req.body;
+  const { name, color, tripType } = req.body;
   const ownerUserId = req.userId;
   try {
-    const newGroup = await groupService.create({ ownerUserId, name, color });
+    const newGroup = await groupService.create({ ownerUserId, name, color, tripType });
     res.status(StatusCodes.CREATED).json(newGroup);
   } catch (error) {
     console.error('Failed to create group:', error);

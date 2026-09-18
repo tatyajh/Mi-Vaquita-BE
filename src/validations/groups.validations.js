@@ -25,6 +25,7 @@ const validateGroup = (groupData) => {
       .max(7)
       .pattern(new RegExp("^#?([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$"))
       .required(),
+    tripType: Joi.string().trim().max(30).allow(null, ''),
   });
 
   return schema.validate(groupData);

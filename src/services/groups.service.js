@@ -12,7 +12,11 @@ const GroupService = () => {
     throw new Error(error.details[0].message);
     }
     if (!newGroup.ownerUserId) {
-      newGroup.ownerUserId = 1; // Valor temporal hasta que se implemente la gestión de usuarios
+      // El controller siempre debe mandar el ownerUserId real (del JWT,
+      // vía el middleware de auth) — nunca inventar un dueño por
+      // defecto, eso fue justo el bug que hacía que los grupos se
+      // crearan a nombre de otro usuario.
+      throw new Error('No se pudo determinar el usuario dueño del grupo');
     }
     return groupModel.createGroupsModel(newGroup);
   };
