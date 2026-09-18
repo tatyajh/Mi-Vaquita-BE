@@ -5,7 +5,7 @@ const ExpensesModel = () => {
     const client = await pool.connect();
     try {
       const result = await client.query(
-        `SELECT e.id, e.group_id, e.paid_by_user_id, e.description, e.amount, e.createdat,
+        `SELECT e.id, e.group_id, e.paid_by_user_id, e.description, e.amount, e.createdat, e.receipt_url,
                 u.name AS paid_by_name, u.email AS paid_by_email
          FROM Expenses e
          JOIN Users u ON e.paid_by_user_id = u.id
@@ -23,9 +23,9 @@ const ExpensesModel = () => {
     const client = await pool.connect();
     try {
       const result = await client.query(
-        `INSERT INTO Expenses (group_id, paid_by_user_id, description, amount, createdAt)
-         VALUES ($1, $2, $3, $4, NOW()) RETURNING *`,
-        [data.groupId, data.paidByUserId, data.description, data.amount]
+        `INSERT INTO Expenses (group_id, paid_by_user_id, description, amount, receipt_url, createdAt)
+         VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *`,
+        [data.groupId, data.paidByUserId, data.description, data.amount, data.receiptUrl ?? null]
       );
       return result.rows[0];
     } finally {

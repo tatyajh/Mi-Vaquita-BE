@@ -71,6 +71,10 @@ const queries = [
     CONSTRAINT fk_expenses_group_id FOREIGN KEY(group_id) REFERENCES Groups(id),
     CONSTRAINT fk_expenses_paid_by_user_id FOREIGN KEY(paid_by_user_id) REFERENCES Users(id)
   );`,
+  // Foto/recibo opcional adjunto a un gasto. Guardamos solo la URL
+  // pública (subida a un storage externo); si no hay integración de
+  // storage configurada, el gasto se guarda igual con receipt_url NULL.
+  `ALTER TABLE Expenses ADD COLUMN IF NOT EXISTS receipt_url VARCHAR(500);`,
 ];
 
 // Los grupos referencian usuarios por posición (1 = miguel, 2 = juan

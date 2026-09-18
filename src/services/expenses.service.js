@@ -7,7 +7,7 @@ const ExpensesService = () => {
     return expensesModel.getAllByGroupModel(groupId);
   };
 
-  const create = async ({ groupId, paidByUserId, description, amount }) => {
+  const create = async ({ groupId, paidByUserId, description, amount, receiptUrl }) => {
     if (!description || !description.trim()) {
       throw new Error('La descripción es obligatoria');
     }
@@ -20,6 +20,7 @@ const ExpensesService = () => {
       paidByUserId,
       description: description.trim(),
       amount: parsedAmount,
+      receiptUrl: receiptUrl || null,
     });
   };
 
