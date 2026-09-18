@@ -17,14 +17,22 @@ const UsersModel = () => {
     return result.rows[0];
   };
 
-  const searchUsersModel = async (query) => {
+  const searchUsersModel = async (query, excludeUserId) => {
     const client = await pool.connect();
-    const result = await client.query(
-      'SELECT id, name, email FROM users WHERE name ILIKE $1 OR email ILIKE $1 ORDER BY name ASC LIMIT 10',
-      [`%${query}%`]
-    );
-    client.release();
-    return result.rows;
+    try {
+      // Excluye al propio usuario autenticado de los resultados: no
+      // debe poder encontrarse ni agregarse a sí mismo como amigo.
+      const result = await client.query(
+        `SELECT id, name, email FROM users
+         WHERE (name ILIKE $1 OR email ILIKE $1)
+           AND ($2::int IS NULL OR id != $2)
+         ORDER BY name ASC LIMIT 10`,
+        [`%${query}%`, excludeUserId ?? null]
+      );
+      return result.rows;
+    } finally {
+      client.release();
+    }
   };
 
   const getByIdUsersModel = async (id) => {

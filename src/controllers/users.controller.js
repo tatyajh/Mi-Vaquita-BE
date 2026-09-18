@@ -47,7 +47,7 @@ export const searchUsersController = async (req, res) => {
     return res.status(StatusCodes.OK).json([]);
   }
   try {
-    const users = await userService.search(q);
+    const users = await userService.search(q, req.userId);
     // Solo exponemos id, name y email — nunca el password.
     res.status(StatusCodes.OK).json(
       users.map((u) => ({ id: u.id, name: u.name, email: u.email }))

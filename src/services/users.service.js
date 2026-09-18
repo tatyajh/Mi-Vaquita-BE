@@ -31,11 +31,11 @@ const UserService = () => {
     return user;
   };
 
-  const search = async (query) => {
+  const search = async (query, excludeUserId) => {
     if (!query || !query.trim()) {
       return [];
     }
-    return userModel.searchUsersModel(query.trim());
+    return userModel.searchUsersModel(query.trim(), excludeUserId);
   };
 
   const getByEmail = async (email) => {
