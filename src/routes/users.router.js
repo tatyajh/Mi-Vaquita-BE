@@ -1,10 +1,11 @@
 import Router from 'express-promise-router';
-import { createUserController, getByIdUsersController, getAllUsersController, getByEmailUsersController } from '../controllers/users.controller.js';
+import { createUserController, getByIdUsersController, getAllUsersController, getByEmailUsersController, searchUsersController } from '../controllers/users.controller.js';
 
 const router = Router();
 
 router.get("/", getAllUsersController);
 router.get("/by-email", getByEmailUsersController);
+router.get("/search", searchUsersController);
 router.get("/:id", getByIdUsersController);
 router.post('/', createUserController);
 

@@ -31,6 +31,13 @@ const UserService = () => {
     return user;
   };
 
+  const search = async (query) => {
+    if (!query || !query.trim()) {
+      return [];
+    }
+    return userModel.searchUsersModel(query.trim());
+  };
+
   const getByEmail = async (email) => {
     const user = await userModel.getByUsersEmailModel(email);
     if (!user) {
@@ -43,7 +50,8 @@ const UserService = () => {
     create,
     getById,
     getByEmail,
-    getAll, 
+    search,
+    getAll,
   };
 };
 

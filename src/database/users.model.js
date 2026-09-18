@@ -17,6 +17,16 @@ const UsersModel = () => {
     return result.rows[0];
   };
 
+  const searchUsersModel = async (query) => {
+    const client = await pool.connect();
+    const result = await client.query(
+      'SELECT id, name, email FROM users WHERE name ILIKE $1 OR email ILIKE $1 ORDER BY name ASC LIMIT 10',
+      [`%${query}%`]
+    );
+    client.release();
+    return result.rows;
+  };
+
   const getByIdUsersModel = async (id) => {
     const client = await pool.connect();
     const result = await client.query('SELECT * FROM users WHERE id = $1', [id]);
@@ -37,6 +47,7 @@ const UsersModel = () => {
   return {
     getAllUsersModel, 
     getByUsersEmailModel,
+    searchUsersModel,
     getByIdUsersModel,
     createUsersModel,
   };

@@ -41,6 +41,23 @@ export const getAllUsersController = async (req, res) => {
   }
 };
 
+export const searchUsersController = async (req, res) => {
+  const { q } = req.query;
+  if (!q || !q.trim()) {
+    return res.status(StatusCodes.OK).json([]);
+  }
+  try {
+    const users = await userService.search(q);
+    // Solo exponemos id, name y email — nunca el password.
+    res.status(StatusCodes.OK).json(
+      users.map((u) => ({ id: u.id, name: u.name, email: u.email }))
+    );
+  } catch (error) {
+    console.error(`Failed to search users with q=${q}:`, error);
+    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: 'Internal server error' });
+  }
+};
+
 export const getByEmailUsersController = async (req, res) => {
   const { email } = req.query;
   if (!email) {
