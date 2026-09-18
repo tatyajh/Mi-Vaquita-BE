@@ -67,19 +67,21 @@ const GroupsModel = () => {
   const deleteGroupsModel = async (id) => {
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
       // Borrar primero lo que depende del grupo por foreign key
       // (Expenses, GroupParticipants) — si no, el DELETE de Groups
       // viola la constraint apenas el grupo tiene un gasto o un
       // participante (que ahora siempre incluye al menos al dueño).
+      // Deletes secuenciales sin BEGIN/COMMIT explícito a propósito:
+      // envolverlos en una transacción manual con este pool compartido
+      // (serverless) dejó una conexión "colgada" a medio-transacción si
+      // el ROLLBACK fallaba al liberar el client, tumbando CUALQUIER
+      // query posterior que reusara esa misma conexión del pool con un
+      // 500 genérico — bug real que se vio en vivo. Cada DELETE por su
+      // cuenta ya es atómico por sí mismo en Postgres (autocommit).
       await client.query('DELETE FROM Expenses WHERE group_id = $1', [id]);
       await client.query('DELETE FROM GroupParticipants WHERE group_id = $1', [id]);
       const result = await client.query('DELETE FROM Groups WHERE id = $1', [id]);
-      await client.query('COMMIT');
       return result.rowCount >= 1;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
     } finally {
       client.release();
     }
