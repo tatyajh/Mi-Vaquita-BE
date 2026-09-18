@@ -40,3 +40,21 @@ export const getAllUsersController = async (req, res) => {
     res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: 'Internal server error' });
   }
 };
+
+export const getByEmailUsersController = async (req, res) => {
+  const { email } = req.query;
+  if (!email) {
+    return res.status(StatusCodes.BAD_REQUEST).json({ message: 'El parámetro email es requerido' });
+  }
+  try {
+    const user = await userService.getByEmail(email);
+    // Solo exponemos los campos necesarios para agregar amigos, nunca el password.
+    res.status(StatusCodes.OK).json({ id: user.id, name: user.name, email: user.email });
+  } catch (error) {
+    if (error instanceof NotFoundException) {
+      return res.status(StatusCodes.NOT_FOUND).json({ message: error.message });
+    }
+    console.error(`Failed to get user with email ${email}:`, error);
+    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: 'Internal server error' });
+  }
+};
