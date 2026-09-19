@@ -3,9 +3,7 @@ import pool from "../lib/connection.js";
 const GroupsModel = () => {
 
   const getAllGroupsModel = async () => {
-    const client = await pool.connect();
-    const result = await client.query("SELECT * FROM Groups");
-    client.release();
+    const result = await pool.query("SELECT * FROM Groups");
     return result.rows;
   };
 
@@ -27,9 +25,7 @@ const GroupsModel = () => {
   };
 
   const getByIdGroupsModel = async (id) => {
-    const client = await pool.connect();
-    const result = await client.query("SELECT * FROM Groups WHERE ID = $1", [id]);
-    client.release();
+    const result = await pool.query("SELECT * FROM Groups WHERE ID = $1", [id]);
     return result.rows[0];
   };
 
@@ -55,12 +51,10 @@ const GroupsModel = () => {
   };
 
   const updateGroupsModel = async (id, data) => {
-    const client = await pool.connect();
-    const result = await client.query(
+    const result = await pool.query(
       "UPDATE Groups set name = $1, color = $2, trip_type = $3 WHERE id = $4 RETURNING *",
       [data.name, data.color, data.tripType || null, id]
     );
-    client.release();
     return result.rows[0];
   };
 
