@@ -83,6 +83,26 @@ const queries = [
   // Tipo de paseo del grupo (playa, montaña, ciudad...), usado para
   // filtrar los consejos de ahorro contextuales.
   `ALTER TABLE Groups ADD COLUMN IF NOT EXISTS trip_type VARCHAR(30);`,
+  // Recuperar contraseña por correo: token de un solo uso + su
+  // expiración. Se guarda hasheado (igual que la contraseña) para que
+  // una fuga de la base de datos no permita resetear cuentas ajenas.
+  `ALTER TABLE Users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(128);`,
+  `ALTER TABLE Users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMP;`,
+  // Baja de cuenta: borrado lógico. No se borra la fila para no
+  // romper el historial de gastos/saldos de otros usuarios que
+  // compartieron un grupo con esta cuenta.
+  `ALTER TABLE Users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;`,
+  `CREATE TABLE IF NOT EXISTS Natilleras (id SERIAL PRIMARY KEY, owner_id INTEGER NOT NULL REFERENCES Users(id), name VARCHAR(100) NOT NULL, starts_on DATE NOT NULL, ends_on DATE NOT NULL, frequency VARCHAR(20) NOT NULL CHECK (frequency IN ('weekly','biweekly','monthly')), contribution NUMERIC(12,2) NOT NULL CHECK (contribution > 0), status VARCHAR(20) NOT NULL DEFAULT 'active', closed_at TIMESTAMP, created_at TIMESTAMP NOT NULL DEFAULT NOW(), CHECK (ends_on >= starts_on));`,
+  `CREATE TABLE IF NOT EXISTS NatilleraMembers (natillera_id INTEGER NOT NULL REFERENCES Natilleras(id), user_id INTEGER NOT NULL REFERENCES Users(id), joined_at TIMESTAMP NOT NULL DEFAULT NOW(), PRIMARY KEY (natillera_id,user_id));`,
+  `CREATE TABLE IF NOT EXISTS NatilleraContributions (id SERIAL PRIMARY KEY, natillera_id INTEGER NOT NULL REFERENCES Natilleras(id), user_id INTEGER NOT NULL REFERENCES Users(id), due_on DATE NOT NULL, amount NUMERIC(12,2) NOT NULL CHECK (amount > 0), recorded_by INTEGER NOT NULL REFERENCES Users(id), created_at TIMESTAMP NOT NULL DEFAULT NOW(), corrected_at TIMESTAMP);`,
+  `CREATE TABLE IF NOT EXISTS NatilleraContributionAudit (id SERIAL PRIMARY KEY, contribution_id INTEGER NOT NULL REFERENCES NatilleraContributions(id), old_amount NUMERIC(12,2), new_amount NUMERIC(12,2) NOT NULL, changed_by INTEGER NOT NULL REFERENCES Users(id), changed_at TIMESTAMP NOT NULL DEFAULT NOW());`,
+  `CREATE TABLE IF NOT EXISTS NatilleraLoans (id SERIAL PRIMARY KEY, natillera_id INTEGER NOT NULL REFERENCES Natilleras(id), user_id INTEGER NOT NULL REFERENCES Users(id), principal NUMERIC(12,2) NOT NULL CHECK (principal > 0), annual_rate NUMERIC(7,4) NOT NULL CHECK (annual_rate >= 0), term_months INTEGER NOT NULL CHECK (term_months > 0), interest NUMERIC(12,2) NOT NULL CHECK (interest >= 0), issued_on DATE NOT NULL DEFAULT CURRENT_DATE, created_by INTEGER NOT NULL REFERENCES Users(id));`,
+  `CREATE TABLE IF NOT EXISTS NatilleraLoanPayments (id SERIAL PRIMARY KEY, loan_id INTEGER NOT NULL REFERENCES NatilleraLoans(id), amount NUMERIC(12,2) NOT NULL CHECK (amount > 0), recorded_by INTEGER NOT NULL REFERENCES Users(id), created_at TIMESTAMP NOT NULL DEFAULT NOW());`,
+  `CREATE TABLE IF NOT EXISTS NatilleraClosures (natillera_id INTEGER PRIMARY KEY REFERENCES Natilleras(id), summary JSONB NOT NULL, confirmed_by INTEGER NOT NULL REFERENCES Users(id), confirmed_at TIMESTAMP NOT NULL DEFAULT NOW());`,
+  `CREATE TABLE IF NOT EXISTS Activities (id SERIAL PRIMARY KEY, group_id INTEGER NOT NULL REFERENCES Groups(id), type VARCHAR(20) NOT NULL CHECK (type IN ('secret_santa','raffle')), name VARCHAR(100) NOT NULL, event_on DATE NOT NULL, budget NUMERIC(12,2), status VARCHAR(20) NOT NULL DEFAULT 'draft', created_by INTEGER NOT NULL REFERENCES Users(id), created_at TIMESTAMP NOT NULL DEFAULT NOW());`,
+  `CREATE TABLE IF NOT EXISTS ActivityMembers (activity_id INTEGER NOT NULL REFERENCES Activities(id), user_id INTEGER NOT NULL REFERENCES Users(id), number INTEGER, recipient_id INTEGER REFERENCES Users(id), PRIMARY KEY (activity_id,user_id), UNIQUE (activity_id,number));`,
+  `CREATE TABLE IF NOT EXISTS ActivityExclusions (activity_id INTEGER NOT NULL REFERENCES Activities(id), user_id INTEGER NOT NULL REFERENCES Users(id), excluded_user_id INTEGER NOT NULL REFERENCES Users(id), PRIMARY KEY (activity_id,user_id,excluded_user_id));`,
+  `CREATE TABLE IF NOT EXISTS ActivityWinners (activity_id INTEGER PRIMARY KEY REFERENCES Activities(id), user_id INTEGER NOT NULL REFERENCES Users(id), number INTEGER NOT NULL, drawn_at TIMESTAMP NOT NULL DEFAULT NOW());`,
 ];
 
 // Los grupos referencian usuarios por posición (1 = miguel, 2 = juan

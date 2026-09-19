@@ -10,6 +10,8 @@ import userRoutes from './routes/users.router.js';
 import authRoutes from './routes/auth.router.js'; 
 import friendRoutes from './routes/friends.router.js';
 import expenseRoutes from './routes/expenses.router.js';
+import natilleraRoutes from './routes/natilleras.router.js';
+import activityRoutes from './routes/activities.router.js';
 
 const app = express();
 app.use(cors());
@@ -25,6 +27,8 @@ app.use('/api/groups', groupRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/friends', friendRoutes);
 app.use('/api/expenses', expenseRoutes);
+app.use('/api/natilleras', natilleraRoutes);
+app.use('/api/activities', activityRoutes);
 
 // En Vercel el runtime de Node maneja el request/response
 // directamente sobre `app` (export default) — llamar a listen() ahí

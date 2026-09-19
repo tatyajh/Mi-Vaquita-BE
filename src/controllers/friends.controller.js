@@ -6,7 +6,7 @@ const friendsService = FriendsService();
 
 export const getFriendsController = async (req, res) => {
   try {
-    const friends = await friendsService.getFriends();
+    const friends = await friendsService.getFriends(req.userId);
     res.status(StatusCodes.OK).json(friends);
   } catch (error) {
     console.error('Error getting friends:', error);
@@ -15,10 +15,17 @@ export const getFriendsController = async (req, res) => {
 };
 
 export const addFriendController = async (req, res) => {
-  const { userId, friendUserId } = req.body;
+  // El userId siempre sale del JWT, nunca del body: si se confiara en
+  // req.body.userId cualquiera podía agregar amigos a nombre de otro
+  // usuario con solo cambiar ese campo en la petición.
+  const userId = req.userId;
+  const { friendUserId } = req.body;
   const { error } = validateFriend({ userId, friendUserId });
   if (error) {
     return res.status(StatusCodes.BAD_REQUEST).json({ message: error.details[0].message });
+  }
+  if (Number(friendUserId) === Number(userId)) {
+    return res.status(StatusCodes.BAD_REQUEST).json({ message: 'No puedes agregarte a ti mismo como amigo.' });
   }
   try {
     const newFriend = await friendsService.addFriend(userId, friendUserId);
@@ -35,7 +42,11 @@ export const addFriendController = async (req, res) => {
 export const deleteFriendController = async (req, res) => {
   const { friendId } = req.params;
   try {
-    const deleted = await friendsService.deleteFriend(friendId);
+    // Se exige que la fila de "friends" pertenezca al usuario
+    // autenticado (req.userId): sin esto, cualquiera con sesión podía
+    // borrar la relación de amistad de cualquier otra persona con solo
+    // adivinar/incrementar el id.
+    const deleted = await friendsService.deleteFriend(friendId, req.userId);
     if (!deleted) {
       return res.status(StatusCodes.NOT_FOUND).json({ message: 'Friend not found' });
     }

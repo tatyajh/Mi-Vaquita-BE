@@ -15,15 +15,27 @@ class NotFoundException extends Error {
   }
 }
 
+const PASSWORD_PATTERN = new RegExp('^(?=.*[a-z])(?=.*[0-9])');
+
 const validateUser = (user) => {
   const schema = Joi.object({
     name: Joi.string().min(3).max(100).required(),
     email: Joi.string().email().required(),
-    password: Joi.string().pattern(new RegExp('^(?=.*[a-z])(?=.*[0-9])')).required(),
+    password: Joi.string().pattern(PASSWORD_PATTERN).required(),
   });
 
   return schema.validate(user);
 };
 
+// Misma regla de contraseña que validateUser, reutilizada para
+// recuperar/cambiar contraseña (no repite la regex a mano).
+const validatePassword = (password) => {
+  const schema = Joi.string().pattern(PASSWORD_PATTERN).required().messages({
+    'string.pattern.base': 'La contraseña debe tener al menos una letra minúscula y un número',
+  });
 
-export { ConflictException, NotFoundException, validateUser };
+  return schema.validate(password);
+};
+
+
+export { ConflictException, NotFoundException, validateUser, validatePassword };

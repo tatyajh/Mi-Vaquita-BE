@@ -78,6 +78,10 @@ const GroupsModel = () => {
       // query posterior que reusara esa misma conexión del pool con un
       // 500 genérico — bug real que se vio en vivo. Cada DELETE por su
       // cuenta ya es atómico por sí mismo en Postgres (autocommit).
+      await client.query('DELETE FROM ActivityExclusions WHERE activity_id IN (SELECT id FROM Activities WHERE group_id=$1)', [id]);
+      await client.query('DELETE FROM ActivityWinners WHERE activity_id IN (SELECT id FROM Activities WHERE group_id=$1)', [id]);
+      await client.query('DELETE FROM ActivityMembers WHERE activity_id IN (SELECT id FROM Activities WHERE group_id=$1)', [id]);
+      await client.query('DELETE FROM Activities WHERE group_id=$1', [id]);
       await client.query('DELETE FROM Expenses WHERE group_id = $1', [id]);
       await client.query('DELETE FROM GroupParticipants WHERE group_id = $1', [id]);
       const result = await client.query('DELETE FROM Groups WHERE id = $1', [id]);

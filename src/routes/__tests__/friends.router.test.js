@@ -1,6 +1,14 @@
 import { jest } from '@jest/globals';
 import express from 'express';
 import request from 'supertest';
+import jwt from 'jsonwebtoken';
+
+// friends.router ahora exige JWT (antes cualquiera sin sesión podía
+// listar/agregar/borrar amigos de cualquiera). Se firma un token
+// válido para que estos tests seguros pasen el middleware y sigan
+// probando lo que probaban antes: el ruteo de deleteFriend.
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
+const authHeader = `Bearer ${jwt.sign({ id: 1 }, process.env.JWT_SECRET)}`;
 
 // The controller (src/controllers/friends.controller.js) goes through
 // FriendsService -> FriendsModel -> a real pg Pool (src/lib/connection.js),
@@ -34,6 +42,16 @@ const buildApp = () => {
   return app;
 };
 
+describe('friends.router requires authentication', () => {
+  it('rejects requests with no Authorization header with 401', async () => {
+    const app = buildApp();
+
+    const res = await request(app).get('/friends');
+
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('friends.router deleteFriend route', () => {
   beforeEach(() => {
     global.__lastDeletedId = undefined;
@@ -42,7 +60,7 @@ describe('friends.router deleteFriend route', () => {
   it('routes DELETE /friends/deleteFriend/:friendId to deleteFriendController with friendId in req.params', async () => {
     const app = buildApp();
 
-    const res = await request(app).delete('/friends/deleteFriend/some-id-123');
+    const res = await request(app).delete('/friends/deleteFriend/some-id-123').set('Authorization', authHeader);
 
     expect(res.status).toBe(204);
     // The controller reads `const { friendId } = req.params;` and passes
@@ -54,7 +72,7 @@ describe('friends.router deleteFriend route', () => {
   it('returns 404 when the friend id does not match any row', async () => {
     const app = buildApp();
 
-    const res = await request(app).delete('/friends/deleteFriend/does-not-exist');
+    const res = await request(app).delete('/friends/deleteFriend/does-not-exist').set('Authorization', authHeader);
 
     expect(res.status).toBe(404);
     expect(global.__lastDeletedId).toBe('does-not-exist');
@@ -71,7 +89,7 @@ describe('friends.router deleteFriend route', () => {
     // the fixed router expects DELETE with a required :friendId segment.
     const app = buildApp();
 
-    const res = await request(app).post('/friends/deleteFriend');
+    const res = await request(app).post('/friends/deleteFriend').set('Authorization', authHeader);
 
     expect(res.status).toBe(404);
   });
@@ -79,7 +97,7 @@ describe('friends.router deleteFriend route', () => {
   it('still exposes DELETE only under the /:friendId path, not the bare path', async () => {
     const app = buildApp();
 
-    const res = await request(app).delete('/friends/deleteFriend');
+    const res = await request(app).delete('/friends/deleteFriend').set('Authorization', authHeader);
 
     // No :friendId segment supplied -> no matching route -> 404, proving
     // the param is required, mirroring how the frontend always calls it

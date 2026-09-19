@@ -4,8 +4,8 @@ import { ConflictException } from '../validations/friends.validations.js';
 const FriendsService = () => {
   const friendsModel = FriendsModel();
 
-  const getFriends = async () => {
-    return friendsModel.getAllFriendsModel();
+  const getFriends = async (userId) => {
+    return friendsModel.getAllFriendsModel(userId);
   };
 
   const addFriend = async (userId, friendUserId) => {
@@ -16,8 +16,8 @@ const FriendsService = () => {
     return friendsModel.createFriendsModel({ userId, friendUserId });
   };
 
-  const deleteFriend = async (friendId) => {
-    return friendsModel.deleteFriendsModel(friendId);
+  const deleteFriend = async (friendId, userId) => {
+    return friendsModel.deleteFriendsModel(friendId, userId);
   };
 
   return {
