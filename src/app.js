@@ -14,6 +14,8 @@ import expenseRoutes from './routes/expenses.router.js';
 import natilleraRoutes from './routes/natilleras.router.js';
 import activityRoutes from './routes/activities.router.js';
 import communityRoutes from './routes/community.router.js';
+import billingRoutes from './routes/billing.router.js';
+import { webhookController } from './controllers/billing.controller.js';
 
 const app = express();
 await migrationsReady;
@@ -23,6 +25,11 @@ app.use(cors({ origin(origin,callback){ if(!origin||allowedOrigins.includes(orig
 // (mi-vaquita-fe.vercel.app) necesita poder leer las respuestas de esta API;
 // el default 'same-origin' de helmet las bloquearía.
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+// Stripe firma el body EXACTO que envía; si express.json() lo parsea
+// y reserializa antes de llegar acá, la firma del webhook ya no
+// calza. Por eso este endpoint necesita el body crudo (Buffer) y debe
+// montarse antes del express.json() global de abajo.
+app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), webhookController);
 app.use(express.json({ limit: '1mb' }));
 
 app.use((req, res, next) => {
@@ -38,6 +45,7 @@ app.use('/api/expenses', expenseRoutes);
 app.use('/api/natilleras', natilleraRoutes);
 app.use('/api/activities', activityRoutes);
 app.use('/api/community', communityRoutes);
+app.use('/api/billing', billingRoutes);
 
 // En Vercel el runtime de Node maneja el request/response
 // directamente sobre `app` (export default) — llamar a listen() ahí

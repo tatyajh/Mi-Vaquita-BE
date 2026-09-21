@@ -66,3 +66,50 @@ export const getGroupBalancesController = async (req, res) => {
     res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: 'Internal server error' });
   }
 };
+
+const escapeCsvField = (value) => {
+  const text = String(value ?? '');
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+const toCsv = (rows) => rows.map(row => row.map(escapeCsvField).join(',')).join('\r\n');
+
+// Función Pro: exporta el historial de gastos y los saldos/pagos
+// sugeridos de un grupo a CSV (se abre directo en Excel/Sheets). Se
+// gatea con requirePro en el router, no acá, para que la decisión de
+// qué es Pro quede en un solo lugar (require-pro.middleware.js).
+export const exportGroupExpensesController = async (req, res) => {
+  try {
+    const [expenses, balances] = await Promise.all([
+      expensesService.getAllByGroup(req.params.groupId),
+      expensesService.getBalances(req.params.groupId),
+    ]);
+
+    const expenseRows = [
+      ['Fecha', 'Descripción', 'Pagado por', 'Monto', 'Categoría', 'Medio de pago'],
+      ...expenses.map(e => [
+        new Date(e.createdat).toLocaleDateString('es-CO'),
+        e.description,
+        e.paid_by_name,
+        e.amount,
+        e.category || '',
+        e.payment_method || '',
+      ]),
+      [],
+      ['Saldos', `Total: ${balances.total}`, `Por persona: ${balances.share}`],
+      ['Nombre', 'Pagó', 'Saldo'],
+      ...balances.balances.map(b => [b.name, b.paid, b.balance]),
+      [],
+      ['Pagos sugeridos'],
+      ['De', 'A', 'Monto'],
+      ...balances.settlements.map(s => [s.from.name, s.to.name, s.amount]),
+    ];
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="grupo-${req.params.groupId}-gastos.csv"`);
+    res.status(StatusCodes.OK).send(toCsv(expenseRows));
+  } catch (error) {
+    console.error('Failed to export group expenses:', error);
+    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: 'Internal server error' });
+  }
+};
