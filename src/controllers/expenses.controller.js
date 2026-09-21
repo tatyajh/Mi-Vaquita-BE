@@ -49,6 +49,13 @@ export const uploadReceiptController = async (req, res) => {
       return res.status(StatusCodes.BAD_REQUEST).json({ message: error.message });
     }
     console.error('Failed to upload receipt:', error);
+    if (error.code === 'STORAGE_UPLOAD_FAILED') {
+      // Muestra el motivo real (bucket inexistente, credenciales
+      // inválidas, etc.) en vez de un 500 genérico — esto es
+      // configuración del servidor, no un dato inválido del usuario,
+      // pero ocultarlo hace imposible diagnosticarlo desde afuera.
+      return res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: error.message });
+    }
     res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: 'No se pudo subir el recibo. Intenta de nuevo.' });
   }
 };
