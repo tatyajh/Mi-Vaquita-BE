@@ -4,7 +4,7 @@ import cors from 'cors';
 // statements in migrations.js on boot. Nothing in the codebase
 // imported this file before, so none of its migrations (including
 // prior fixes to the Friends table) ever actually ran in production.
-import './utils/migrations.js';
+import { migrationsReady } from './utils/migrations.js';
 import groupRoutes from './routes/groups.router.js';
 import userRoutes from './routes/users.router.js';
 import authRoutes from './routes/auth.router.js'; 
@@ -12,9 +12,12 @@ import friendRoutes from './routes/friends.router.js';
 import expenseRoutes from './routes/expenses.router.js';
 import natilleraRoutes from './routes/natilleras.router.js';
 import activityRoutes from './routes/activities.router.js';
+import communityRoutes from './routes/community.router.js';
 
 const app = express();
-app.use(cors());
+await migrationsReady;
+const allowedOrigins = [process.env.FRONTEND_URL, ...(process.env.NODE_ENV === 'production' ? [] : ['http://localhost:3000','http://127.0.0.1:3000'])].filter(Boolean).map(x=>x.replace(/\/$/,''));
+app.use(cors({ origin(origin,callback){ if(!origin||allowedOrigins.includes(origin.replace(/\/$/,'')))return callback(null,true); callback(new Error('Origen no permitido por CORS')); } }));
 app.use(express.json());
 
 app.use((req, res, next) => {
@@ -29,6 +32,7 @@ app.use('/api/friends', friendRoutes);
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/natilleras', natilleraRoutes);
 app.use('/api/activities', activityRoutes);
+app.use('/api/community', communityRoutes);
 
 // En Vercel el runtime de Node maneja el request/response
 // directamente sobre `app` (export default) — llamar a listen() ahí

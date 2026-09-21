@@ -1,5 +1,6 @@
 import bcrypt from "bcrypt";
 import pool from "../lib/connection.js";
+import { encryptDeliveryUrl } from './private-url.crypto.js';
 
 const SEED_USERS = [
   { name: 'miguel', email: 'miguel@gmail.com', createdAt: '2023-01-02' },
@@ -96,6 +97,7 @@ const queries = [
   // romper el historial de gastos/saldos de otros usuarios que
   // compartieron un grupo con esta cuenta.
   `ALTER TABLE Users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;`,
+  `ALTER TABLE Users ALTER COLUMN email TYPE VARCHAR(254);`,
   `CREATE TABLE IF NOT EXISTS Natilleras (id SERIAL PRIMARY KEY, owner_id INTEGER NOT NULL REFERENCES Users(id), name VARCHAR(100) NOT NULL, starts_on DATE NOT NULL, ends_on DATE NOT NULL, frequency VARCHAR(20) NOT NULL CHECK (frequency IN ('weekly','biweekly','monthly')), contribution NUMERIC(12,2) NOT NULL CHECK (contribution > 0), status VARCHAR(20) NOT NULL DEFAULT 'active', closed_at TIMESTAMP, created_at TIMESTAMP NOT NULL DEFAULT NOW(), CHECK (ends_on >= starts_on));`,
   `CREATE TABLE IF NOT EXISTS NatilleraMembers (natillera_id INTEGER NOT NULL REFERENCES Natilleras(id), user_id INTEGER NOT NULL REFERENCES Users(id), joined_at TIMESTAMP NOT NULL DEFAULT NOW(), PRIMARY KEY (natillera_id,user_id));`,
   `CREATE TABLE IF NOT EXISTS NatilleraContributions (id SERIAL PRIMARY KEY, natillera_id INTEGER NOT NULL REFERENCES Natilleras(id), user_id INTEGER NOT NULL REFERENCES Users(id), due_on DATE NOT NULL, amount NUMERIC(12,2) NOT NULL CHECK (amount > 0), recorded_by INTEGER NOT NULL REFERENCES Users(id), created_at TIMESTAMP NOT NULL DEFAULT NOW(), corrected_at TIMESTAMP);`,
@@ -107,6 +109,50 @@ const queries = [
   `CREATE TABLE IF NOT EXISTS ActivityMembers (activity_id INTEGER NOT NULL REFERENCES Activities(id), user_id INTEGER NOT NULL REFERENCES Users(id), number INTEGER, recipient_id INTEGER REFERENCES Users(id), PRIMARY KEY (activity_id,user_id), UNIQUE (activity_id,number));`,
   `CREATE TABLE IF NOT EXISTS ActivityExclusions (activity_id INTEGER NOT NULL REFERENCES Activities(id), user_id INTEGER NOT NULL REFERENCES Users(id), excluded_user_id INTEGER NOT NULL REFERENCES Users(id), PRIMARY KEY (activity_id,user_id,excluded_user_id));`,
   `CREATE TABLE IF NOT EXISTS ActivityWinners (activity_id INTEGER PRIMARY KEY REFERENCES Activities(id), user_id INTEGER NOT NULL REFERENCES Users(id), number INTEGER NOT NULL, drawn_at TIMESTAMP NOT NULL DEFAULT NOW());`,
+  // Modelo ampliado: participantes independientes (cuenta o invitado),
+  // recaudos, inventario y notificaciones. Las tablas anteriores se
+  // conservan para que grupos y actividades existentes sigan funcionando.
+  `CREATE INDEX IF NOT EXISTS users_email_normalized_idx ON Users (LOWER(TRIM(email))) WHERE deleted_at IS NULL;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT LOWER(TRIM(email)) FROM Users WHERE deleted_at IS NULL GROUP BY LOWER(TRIM(email)) HAVING COUNT(*) > 1) THEN CREATE UNIQUE INDEX IF NOT EXISTS users_email_normalized_unique ON Users (LOWER(TRIM(email))) WHERE deleted_at IS NULL; END IF; END $$;`,
+  `ALTER TABLE Natilleras ADD COLUMN IF NOT EXISTS purpose VARCHAR(240);`,
+  `ALTER TABLE Natilleras ADD COLUMN IF NOT EXISTS profit_distribution VARCHAR(20) NOT NULL DEFAULT 'proportional';`,
+  `ALTER TABLE Natilleras ADD COLUMN IF NOT EXISTS late_fee NUMERIC(12,2) NOT NULL DEFAULT 0;`,
+  `ALTER TABLE Natilleras ADD COLUMN IF NOT EXISTS rules_locked_at TIMESTAMP;`,
+  `ALTER TABLE Natilleras DROP CONSTRAINT IF EXISTS natilleras_profit_distribution_check;`,
+  `ALTER TABLE Natilleras ADD CONSTRAINT natilleras_profit_distribution_check CHECK (profit_distribution IN ('proportional','equal'));`,
+  `CREATE TABLE IF NOT EXISTS Guests (id SERIAL PRIMARY KEY, name VARCHAR(100) NOT NULL, email VARCHAR(254), phone VARCHAR(30), claimed_user_id INTEGER REFERENCES Users(id), created_by INTEGER NOT NULL REFERENCES Users(id), created_at TIMESTAMP NOT NULL DEFAULT NOW(), CHECK (email IS NOT NULL OR phone IS NOT NULL));`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS guests_creator_email_unique ON Guests(created_by, LOWER(TRIM(email))) WHERE email IS NOT NULL AND claimed_user_id IS NULL;`,
+  `CREATE TABLE IF NOT EXISTS NatilleraParticipants (id SERIAL PRIMARY KEY, natillera_id INTEGER NOT NULL REFERENCES Natilleras(id) ON DELETE CASCADE, user_id INTEGER REFERENCES Users(id), guest_id INTEGER REFERENCES Guests(id), role VARCHAR(20) NOT NULL DEFAULT 'member' CHECK (role IN ('admin','treasurer','member','viewer')), joined_at TIMESTAMP NOT NULL DEFAULT NOW(), CHECK ((user_id IS NOT NULL)::int + (guest_id IS NOT NULL)::int = 1));`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS natillera_participant_user_unique ON NatilleraParticipants(natillera_id,user_id) WHERE user_id IS NOT NULL;`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS natillera_participant_guest_unique ON NatilleraParticipants(natillera_id,guest_id) WHERE guest_id IS NOT NULL;`,
+  `CREATE TABLE IF NOT EXISTS NatilleraQuotas (id SERIAL PRIMARY KEY, natillera_id INTEGER NOT NULL REFERENCES Natilleras(id) ON DELETE CASCADE, kind VARCHAR(20) NOT NULL CHECK(kind IN ('ordinary','extraordinary','late_fee')), name VARCHAR(120) NOT NULL, due_on DATE NOT NULL, amount NUMERIC(12,2) NOT NULL CHECK(amount >= 0), created_by INTEGER NOT NULL REFERENCES Users(id), created_at TIMESTAMP NOT NULL DEFAULT NOW());`,
+  `ALTER TABLE NatilleraQuotas ADD COLUMN IF NOT EXISTS audience VARCHAR(20) NOT NULL DEFAULT 'all';`,
+  `ALTER TABLE NatilleraQuotas DROP CONSTRAINT IF EXISTS natilleraquotas_audience_check;`,
+  `ALTER TABLE NatilleraQuotas ADD CONSTRAINT natilleraquotas_audience_check CHECK(audience IN ('all','guests'));`,
+  `CREATE TABLE IF NOT EXISTS NatilleraParticipantContributions (id SERIAL PRIMARY KEY, natillera_id INTEGER NOT NULL REFERENCES Natilleras(id) ON DELETE CASCADE, participant_id INTEGER NOT NULL REFERENCES NatilleraParticipants(id), quota_id INTEGER REFERENCES NatilleraQuotas(id), amount NUMERIC(12,2) NOT NULL CHECK(amount <> 0), kind VARCHAR(20) NOT NULL DEFAULT 'payment' CHECK(kind IN ('payment','adjustment','reversal')), note VARCHAR(240), adjustment_of INTEGER REFERENCES NatilleraParticipantContributions(id), recorded_by INTEGER NOT NULL REFERENCES Users(id), created_at TIMESTAMP NOT NULL DEFAULT NOW());`,
+  `ALTER TABLE Activities ALTER COLUMN group_id DROP NOT NULL;`,
+  `ALTER TABLE Activities ADD COLUMN IF NOT EXISTS owner_id INTEGER REFERENCES Users(id);`,
+  `ALTER TABLE Activities ADD COLUMN IF NOT EXISTS natillera_id INTEGER REFERENCES Natilleras(id);`,
+  `ALTER TABLE Activities ADD COLUMN IF NOT EXISTS description VARCHAR(500);`,
+  `ALTER TABLE Activities ADD COLUMN IF NOT EXISTS reconciled_at TIMESTAMP;`,
+  `UPDATE Activities a SET owner_id=g.owneruserid FROM Groups g WHERE a.group_id=g.id AND a.owner_id IS NULL;`,
+  `ALTER TABLE Activities DROP CONSTRAINT IF EXISTS activities_type_check;`,
+  `ALTER TABLE Activities ADD CONSTRAINT activities_type_check CHECK (type IN ('secret_santa','raffle','sale','bazaar','bingo','game','food','other'));`,
+  `CREATE TABLE IF NOT EXISTS ActivityParticipants (id SERIAL PRIMARY KEY, activity_id INTEGER NOT NULL REFERENCES Activities(id) ON DELETE CASCADE, user_id INTEGER REFERENCES Users(id), guest_id INTEGER REFERENCES Guests(id), role VARCHAR(20) NOT NULL DEFAULT 'participant' CHECK (role IN ('admin','responsible','participant','viewer')), number INTEGER, recipient_participant_id INTEGER REFERENCES ActivityParticipants(id), created_at TIMESTAMP NOT NULL DEFAULT NOW(), CHECK ((user_id IS NOT NULL)::int + (guest_id IS NOT NULL)::int = 1), UNIQUE(activity_id,number));`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS activity_participant_user_unique ON ActivityParticipants(activity_id,user_id) WHERE user_id IS NOT NULL;`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS activity_participant_guest_unique ON ActivityParticipants(activity_id,guest_id) WHERE guest_id IS NOT NULL;`,
+  `CREATE TABLE IF NOT EXISTS ActivityParticipantExclusions (activity_id INTEGER NOT NULL REFERENCES Activities(id) ON DELETE CASCADE, participant_id INTEGER NOT NULL REFERENCES ActivityParticipants(id) ON DELETE CASCADE, excluded_participant_id INTEGER NOT NULL REFERENCES ActivityParticipants(id) ON DELETE CASCADE, PRIMARY KEY(activity_id,participant_id,excluded_participant_id), CHECK(participant_id <> excluded_participant_id));`,
+  `CREATE TABLE IF NOT EXISTS ActivityParticipantWinners (activity_id INTEGER PRIMARY KEY REFERENCES Activities(id) ON DELETE CASCADE, participant_id INTEGER NOT NULL REFERENCES ActivityParticipants(id), number INTEGER NOT NULL, drawn_at TIMESTAMP NOT NULL DEFAULT NOW());`,
+  `CREATE TABLE IF NOT EXISTS Invitations (id SERIAL PRIMARY KEY, scope_type VARCHAR(20) NOT NULL CHECK(scope_type IN ('activity','natillera')), scope_id INTEGER NOT NULL, guest_id INTEGER NOT NULL REFERENCES Guests(id), token_hash VARCHAR(64) NOT NULL UNIQUE, pin_hash VARCHAR(100), expires_at TIMESTAMP NOT NULL, claimed_at TIMESTAMP, revoked_at TIMESTAMP, created_by INTEGER NOT NULL REFERENCES Users(id), created_at TIMESTAMP NOT NULL DEFAULT NOW());`,
+  `CREATE TABLE IF NOT EXISTS Notifications (id SERIAL PRIMARY KEY, activity_id INTEGER REFERENCES Activities(id) ON DELETE CASCADE, participant_id INTEGER REFERENCES ActivityParticipants(id) ON DELETE CASCADE, kind VARCHAR(30) NOT NULL, channel VARCHAR(20) NOT NULL CHECK(channel IN ('email','whatsapp')), status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','sent','failed')), idempotency_key VARCHAR(160) NOT NULL UNIQUE, attempts INTEGER NOT NULL DEFAULT 0, last_error VARCHAR(500), sent_at TIMESTAMP, created_at TIMESTAMP NOT NULL DEFAULT NOW());`,
+  `ALTER TABLE Notifications ADD COLUMN IF NOT EXISTS delivery_url VARCHAR(800);`,
+  `ALTER TABLE Notifications DROP CONSTRAINT IF EXISTS notifications_status_check;`,
+  `ALTER TABLE Notifications ADD CONSTRAINT notifications_status_check CHECK(status IN ('pending','prepared','sent','failed'));`,
+  `CREATE TABLE IF NOT EXISTS FundraisingTransactions (id SERIAL PRIMARY KEY, activity_id INTEGER NOT NULL REFERENCES Activities(id) ON DELETE CASCADE, kind VARCHAR(20) NOT NULL CHECK(kind IN ('income','cost','expense','adjustment')), description VARCHAR(240) NOT NULL, amount NUMERIC(12,2) NOT NULL CHECK(amount > 0), receipt_url VARCHAR(500), recorded_by INTEGER NOT NULL REFERENCES Users(id), occurred_at TIMESTAMP NOT NULL DEFAULT NOW(), reversed_transaction_id INTEGER REFERENCES FundraisingTransactions(id), created_at TIMESTAMP NOT NULL DEFAULT NOW());`,
+  `CREATE TABLE IF NOT EXISTS InventoryProducts (id SERIAL PRIMARY KEY, activity_id INTEGER NOT NULL REFERENCES Activities(id) ON DELETE CASCADE, name VARCHAR(120) NOT NULL, unit VARCHAR(30) NOT NULL DEFAULT 'unidad', cost_price NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK(cost_price >= 0), sale_price NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK(sale_price >= 0), created_at TIMESTAMP NOT NULL DEFAULT NOW());`,
+  `CREATE TABLE IF NOT EXISTS InventoryMovements (id SERIAL PRIMARY KEY, product_id INTEGER NOT NULL REFERENCES InventoryProducts(id) ON DELETE CASCADE, kind VARCHAR(20) NOT NULL CHECK(kind IN ('initial','entry','sale','loss','adjustment')), quantity NUMERIC(12,3) NOT NULL CHECK(quantity <> 0), unit_price NUMERIC(12,2), note VARCHAR(240), recorded_by INTEGER NOT NULL REFERENCES Users(id), created_at TIMESTAMP NOT NULL DEFAULT NOW());`,
+  `CREATE TABLE IF NOT EXISTS NatilleraLedger (id SERIAL PRIMARY KEY, natillera_id INTEGER NOT NULL REFERENCES Natilleras(id) ON DELETE CASCADE, activity_id INTEGER REFERENCES Activities(id), kind VARCHAR(30) NOT NULL CHECK(kind IN ('activity_profit','general_expense','late_fee','adjustment')), amount NUMERIC(12,2) NOT NULL CHECK(amount <> 0), description VARCHAR(240) NOT NULL, recorded_by INTEGER NOT NULL REFERENCES Users(id), created_at TIMESTAMP NOT NULL DEFAULT NOW());`,
+  `CREATE TABLE IF NOT EXISTS AuditLog (id BIGSERIAL PRIMARY KEY, actor_user_id INTEGER REFERENCES Users(id), actor_guest_id INTEGER REFERENCES Guests(id), scope_type VARCHAR(30) NOT NULL, scope_id INTEGER NOT NULL, action VARCHAR(60) NOT NULL, before_data JSONB, after_data JSONB, created_at TIMESTAMP NOT NULL DEFAULT NOW());`,
 ];
 
 // Los grupos referencian usuarios por posición (1 = miguel, 2 = juan
@@ -126,9 +172,12 @@ const GROUP_SEED_QUERY = `INSERT INTO Groups (name, color, ownerUserId, createdA
 
 async function runMigrations() {
   const client = await pool.connect();
-  for (let query of queries) {
-    await client.query(query);
-  }
+  try {
+    // Evita que dos instancias serverless intenten alterar el esquema a la vez.
+    await client.query('SELECT pg_advisory_lock($1)', [20260920]);
+    for (let query of queries) await client.query(query);
+    const legacyPrivateUrls=(await client.query("SELECT id,delivery_url FROM Notifications WHERE delivery_url LIKE '%token=%' AND delivery_url NOT LIKE 'enc:v1:%' FOR UPDATE")).rows;
+    for(const row of legacyPrivateUrls)await client.query('UPDATE Notifications SET delivery_url=$1 WHERE id=$2',[encryptDeliveryUrl(row.delivery_url),row.id]);
 
   // Los datos de ejemplo (usuarios y grupos demo) son SOLO para
   // desarrollo local. Nunca deben insertarse automáticamente en
@@ -153,8 +202,11 @@ async function runMigrations() {
     console.log('Seeding de datos demo omitido (SEED_DEMO_DATA no está en "true", o NODE_ENV es production).');
   }
 
-  console.log("Migrations ran successfully");
-  client.release();
+    console.log("Migrations ran successfully");
+  } finally {
+    await client.query('SELECT pg_advisory_unlock($1)', [20260920]).catch(() => {});
+    client.release();
+  }
   // No cerrar el pool acá: este archivo ahora se importa desde
   // app.js al arrancar el servidor (antes era un script standalone,
   // por eso cerraba el pool al final). Si se cierra, cualquier
@@ -163,4 +215,4 @@ async function runMigrations() {
   // pool" — el pool debe vivir mientras viva el servidor.
 }
 
-runMigrations().catch(console.error);
+export const migrationsReady = runMigrations();

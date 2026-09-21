@@ -18,10 +18,27 @@
 --
 -- Después de correrlo no queda ningún usuario: tendrás que registrar
 -- una cuenta nueva desde /register para volver a entrar.
+-- IMPORTANTE: inicia una vez la versión actual del backend para crear
+-- todas las tablas antes de usar este modo. Si el esquema es anterior,
+-- usa recreate_database.sql y luego reinicia el backend.
 
 BEGIN;
 
 TRUNCATE TABLE
+  auditlog,
+  natilleraledger,
+  inventorymovements,
+  inventoryproducts,
+  fundraisingtransactions,
+  notifications,
+  invitations,
+  activityparticipantexclusions,
+  activityparticipantwinners,
+  activityparticipants,
+  natilleraparticipants,
+  natilleraparticipantcontributions,
+  natilleraquotas,
+  guests,
   activitywinners,
   activityexclusions,
   activitymembers,

@@ -18,6 +18,7 @@ const UserService = () => {
   };
 
   const create = async (newUser) => {
+    newUser = { ...newUser, email: String(newUser.email || '').trim().toLowerCase() };
     const { error } = validateUser(newUser);
     if (error) {
       throw new Error(error.details[0].message);
@@ -47,7 +48,8 @@ const UserService = () => {
   };
 
   const getByEmail = async (email) => {
-    const user = await userModel.getByUsersEmailModel(email);
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const user = await userModel.getByUsersEmailModel(normalizedEmail);
     if (!user) {
       throw new NotFoundException(`User with email ${email} does not exist`);
     }
@@ -58,7 +60,7 @@ const UserService = () => {
   // lo encuentra): así la respuesta al cliente nunca revela si un
   // email está registrado o no en Mi Vaquita.
   const requestPasswordReset = async (email, frontendUrl) => {
-    const user = await userModel.getByUsersEmailModel(email);
+    const user = await userModel.getByUsersEmailModel(String(email || '').trim().toLowerCase());
     if (!user) {
       return;
     }

@@ -1,4 +1,4 @@
-import { dueDates } from '../natilleras.router.js';
+import { dueDates, buildParticipantSchedule } from '../natilleras.router.js';
 import { matching } from '../activities.router.js';
 import natilleraRouter from '../natilleras.router.js';
 import activityRouter from '../activities.router.js';
@@ -21,6 +21,12 @@ describe('cronograma de natillera', () => {
   it('genera cuotas semanales sin pasar la fecha final', () => {
     expect(dueDates({starts_on:'2026-09-01',ends_on:'2026-09-16',frequency:'weekly'}))
       .toEqual(['2026-09-01','2026-09-08','2026-09-15']);
+  });
+  it('hace exigibles las cuotas ordinarias de invitados y reconoce pagos vinculados',()=>{
+    const participants=[{participant_id:8,guest_id:3,name:'Invitada'}];
+    const quotas=[{id:4,kind:'ordinary',audience:'guests',due_on:'2026-09-01',amount:'50000'}];
+    expect(buildParticipantSchedule(participants,quotas,[],'2026-09-21')[0]).toMatchObject({balance:50000,status:'overdue'});
+    expect(buildParticipantSchedule(participants,quotas,[{participant_id:8,quota_id:4,paid:'50000'}],'2026-09-21')[0]).toMatchObject({balance:0,status:'paid'});
   });
 });
 

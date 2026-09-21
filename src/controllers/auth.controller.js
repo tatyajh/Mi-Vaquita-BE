@@ -7,7 +7,8 @@ import { NotFoundException } from "../validations/users.validations.js";
 const userService = UserService();
 
 export const loginController = async (req, res) => {
-  const { email, password } = req.body;
+  const { password } = req.body;
+  const email = String(req.body.email || '').trim().toLowerCase();
 
   try {
     // getByEmail ya excluye cuentas dadas de baja (deleted_at), así
@@ -61,7 +62,7 @@ export const loginController = async (req, res) => {
 // dado de baja); acá se trata igual que "sí existe" para no filtrar
 // esa información — ambos casos responden el mismo mensaje genérico.
 export const forgotPasswordController = async (req, res) => {
-  const { email } = req.body;
+  const email = String(req.body.email || '').trim().toLowerCase();
   if (!email) {
     return res.status(StatusCodes.BAD_REQUEST).json({ message: 'El correo es requerido' });
   }

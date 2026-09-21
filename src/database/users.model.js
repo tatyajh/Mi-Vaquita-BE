@@ -17,7 +17,7 @@ const UsersModel = () => {
   };
 
   const getByUsersEmailModel = async (email) => {
-    const result = await pool.query('SELECT * FROM users WHERE email = $1 AND deleted_at IS NULL', [email]);
+    const result = await pool.query('SELECT * FROM users WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL', [String(email || '').trim()]);
     return result.rows[0];
   };
 
@@ -43,7 +43,7 @@ const UsersModel = () => {
   const createUsersModel = async (data) => {
     const result = await pool.query(
       'INSERT INTO users (name, email, password, createdAt) VALUES ($1, $2, $3, NOW()) RETURNING *',
-      [data.name, data.email, data.password]
+      [data.name, String(data.email).trim().toLowerCase(), data.password]
     );
     return result.rows[0];
   };

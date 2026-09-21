@@ -1,5 +1,32 @@
 # Arquitectura de 3 Capas para APIs
 
+## Configuración obligatoria
+
+En producción configura `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL`,
+`RESEND_API_KEY` y `RESEND_FROM_EMAIL`. El remitente debe pertenecer a un
+dominio verificado en Resend. Si falta una variable de correo, la API conserva
+la respuesta genérica de recuperación para no revelar cuentas, pero registra
+un error interno y no simula un envío exitoso.
+
+Las rutas ampliadas están bajo `/api/community`: actividades independientes,
+participantes registrados o invitados, invitaciones con PIN, recaudos,
+inventario, sorteos privados y consulta limitada para invitados. Las rutas
+anteriores de grupos y actividades se conservan por compatibilidad.
+
+En esta versión los préstamos se registran únicamente a usuarios con cuenta;
+los invitados pueden participar, recibir invitaciones, aportar y aparecer en
+el cierre, pero deben vincular su invitación a una cuenta antes de pedir un
+préstamo.
+
+El límite de intentos incorporado es local a cada proceso. En producción debe
+complementarse con rate limiting del proveedor o gateway para cubrir varias
+instancias serverless.
+
+Los scripts en `scripts/` son manuales: `diagnose_database.sql` solo consulta,
+`reset_database.sql` limpia datos conservando el esquema y
+`recreate_database.sql` elimina las tablas para que el siguiente arranque las
+recree. Ninguno se ejecuta durante el inicio normal.
+
 Este proyecto sigue una arquitectura de 3 capas, que es una forma de estructurar una aplicación donde se separa la lógica de negocio en tres capas distintas: presentación, lógica de negocio y acceso a datos. En este caso, la presentación se maneja a través de la capa de rutas y controladores, la lógica de negocio se encuentra en los servicios, y el acceso a datos se realiza a través de los servicios.
 
 ## Estructura de archivos
