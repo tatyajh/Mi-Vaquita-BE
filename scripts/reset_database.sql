@@ -10,8 +10,8 @@
 --   3. Pega este bloque completo y dale "Run"
 --
 -- Qué hace:
---   - Borra TODOS los usuarios, grupos, participantes, amistades y
---     gastos (incluidos los usuarios semilla como miguel@gmail.com).
+--   - Borra TODOS los usuarios, grupos, participantes, amistades,
+--     gastos, natilleras, aportes, préstamos, cierres y actividades.
 --   - CASCADE se encarga de las llaves foráneas sin importar el orden.
 --   - RESTART IDENTITY reinicia los contadores de id a 1, para que el
 --     próximo usuario/grupo que crees vuelva a empezar en el id 1.
@@ -19,5 +19,33 @@
 -- Después de correrlo no queda ningún usuario: tendrás que registrar
 -- una cuenta nueva desde /register para volver a entrar.
 
-TRUNCATE TABLE expenses, groupparticipants, friends, groups, users
-  RESTART IDENTITY CASCADE;
+BEGIN;
+
+TRUNCATE TABLE
+  activitywinners,
+  activityexclusions,
+  activitymembers,
+  activities,
+  natilleraclosures,
+  natilleraloanpayments,
+  natilleraloans,
+  natilleracontributionaudit,
+  natilleracontributions,
+  natilleramembers,
+  natilleras,
+  expenses,
+  groupparticipants,
+  friends,
+  groups,
+  users
+RESTART IDENTITY CASCADE;
+
+COMMIT;
+
+-- Verificación: todas estas cantidades deben quedar en 0.
+SELECT
+  (SELECT COUNT(*) FROM users) AS users,
+  (SELECT COUNT(*) FROM friends) AS friends,
+  (SELECT COUNT(*) FROM groups) AS groups,
+  (SELECT COUNT(*) FROM natilleras) AS natilleras,
+  (SELECT COUNT(*) FROM activities) AS activities;

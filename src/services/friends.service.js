@@ -13,7 +13,15 @@ const FriendsService = () => {
     if (existingFriend) {
       throw new ConflictException('Friend already exists');
     }
-    return friendsModel.createFriendsModel({ userId, friendUserId });
+    try {
+      return await friendsModel.createFriendsModel({ userId, friendUserId });
+    } catch (error) {
+      // El índice único también protege dos solicitudes simultáneas.
+      if (error?.code === '23505') {
+        throw new ConflictException('Friend already exists');
+      }
+      throw error;
+    }
   };
 
   const deleteFriend = async (friendId, userId) => {

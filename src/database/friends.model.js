@@ -9,7 +9,10 @@ const FriendsModel = () => {
     // Antes no filtraba por user_id: cualquier usuario logueado veía
     // la lista de amigos de TODOS los usuarios de la app.
     const result = await pool.query(
-      'SELECT f.id, u.id AS friend_user_id, u.name, u.email FROM friends f JOIN users u ON f.friend_user_id = u.id WHERE f.user_id = $1',
+      `SELECT DISTINCT ON (u.id) f.id, u.id AS friend_user_id, u.name, u.email
+       FROM friends f JOIN users u ON f.friend_user_id = u.id
+       WHERE f.user_id = $1 AND u.deleted_at IS NULL
+       ORDER BY u.id, f.id`,
       [userId]
     );
     return result.rows;

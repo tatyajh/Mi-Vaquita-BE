@@ -52,6 +52,10 @@ const queries = [
   // porque esas columnas ya no se usan para la relación.
   `ALTER TABLE Friends ALTER COLUMN name DROP NOT NULL;`,
   `ALTER TABLE Friends ALTER COLUMN email DROP NOT NULL;`,
+  // Limpia relaciones duplicadas creadas por versiones anteriores y
+  // hace que Postgres, no solo la aplicación, impida repetirlas.
+  `DELETE FROM Friends a USING Friends b WHERE a.id > b.id AND a.user_id = b.user_id AND a.friend_user_id = b.friend_user_id;`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS friends_user_friend_unique ON Friends(user_id, friend_user_id) WHERE user_id IS NOT NULL AND friend_user_id IS NOT NULL;`,
   `CREATE TABLE IF NOT EXISTS GroupParticipants (
     id SERIAL,
     group_id INTEGER NOT NULL,
