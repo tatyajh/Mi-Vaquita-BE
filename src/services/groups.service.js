@@ -1,10 +1,21 @@
 import GroupsModel from "../database/groups.model.js";
-import { NotFoundException, ConflictException, validateGroup } from "../validations/groups.validations.js";
+import { NotFoundException, ConflictException, ProRequiredException, validateGroup } from "../validations/groups.validations.js";
+import { isFreeGroupColor } from "../constants/group-colors.js";
+import billingService from "./billing.service.js";
 
 const MAX_GROUP_MEMBERS = 20;
 
 const GroupService = () => {
   const groupModel = GroupsModel();
+
+  // Se valida acá (no solo en el picker del frontend) para que elegir
+  // un color fuera de los 8 gratuitos sin ser Pro no baste con llamar
+  // a la API directo.
+  const assertColorAllowed = async (color, userId) => {
+    if (isFreeGroupColor(color)) return;
+    if (await billingService.isUserPro(userId)) return;
+    throw new ProRequiredException('Los colores personalizados son una función de Mi Vaquita Pro. Elige uno de los colores gratuitos o actualiza tu plan.');
+  };
 
   const create = async (newGroup) => {
     const { error } = validateGroup(newGroup);
@@ -18,6 +29,7 @@ const GroupService = () => {
       // crearan a nombre de otro usuario.
       throw new Error('No se pudo determinar el usuario dueño del grupo');
     }
+    await assertColorAllowed(newGroup.color, newGroup.ownerUserId);
     return groupModel.createGroupsModel(newGroup);
   };
 
@@ -38,7 +50,7 @@ const GroupService = () => {
     return group;
   };
 
-  const editById = async (id, groupData) => {
+  const editById = async (id, groupData, actorUserId) => {
     const { error } = validateGroup(groupData);
     if (error) {
       throw new Error(error.details[0].message);
@@ -49,6 +61,7 @@ const GroupService = () => {
       throw new NotFoundException(`Group with id ${id} does not exist`);
     }
 
+    await assertColorAllowed(groupData.color, actorUserId);
     return groupModel.updateGroupsModel(id, groupData);
   };
 

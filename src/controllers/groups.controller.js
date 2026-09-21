@@ -1,6 +1,6 @@
 import GroupService from "../services/groups.service.js";
 import { StatusCodes } from 'http-status-codes';
-import { NotFoundException, ConflictException } from '../validations/groups.validations.js';
+import { NotFoundException, ConflictException, ProRequiredException } from '../validations/groups.validations.js';
 
 const groupService = GroupService();
 
@@ -35,19 +35,25 @@ export const createGroupsController = async (req, res) => {
     const newGroup = await groupService.create({ ownerUserId, name, color, tripType, photoData });
     res.status(StatusCodes.CREATED).json(newGroup);
   } catch (error) {
+    if (error instanceof ProRequiredException) {
+      return res.status(error.statusCode).json({ message: error.message, code: error.code });
+    }
     console.error('Failed to create group:', error);
     res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: error.message || "Internal server error" });
   }
 };
 
 export const editByIdGroupsController = async (req, res) => {
+  const { id } = req.params;
   try {
-    const { id } = req.params;
-    const updatedGroup = await groupService.editById(id, req.body);
+    const updatedGroup = await groupService.editById(id, req.body, req.userId);
     res.status(StatusCodes.OK).json(updatedGroup);
   } catch (error) {
     if (error instanceof NotFoundException) {
       return res.status(StatusCodes.NOT_FOUND).json({ message: error.message });
+    }
+    if (error instanceof ProRequiredException) {
+      return res.status(error.statusCode).json({ message: error.message, code: error.code });
     }
     console.error(`Failed to update group with id ${id}:`, error);
     res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: "Internal server error" });
