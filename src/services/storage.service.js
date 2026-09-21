@@ -15,7 +15,16 @@
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic']);
 const MAX_BYTES = 8 * 1024 * 1024;
 
-const isConfigured = () => Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+// Un salto de línea o espacio de más al pegar la variable en Vercel
+// (algo muy fácil de hacer sin querer) deja un carácter inválido para
+// un header HTTP — el fetch nativo lo rechaza con un TypeError críptico
+// de "Headers.append" en vez de un error legible, como pasó en vivo la
+// primera vez que se activó esto. .trim() lo evita de raíz.
+const supabaseUrl = () => process.env.SUPABASE_URL?.trim();
+const supabaseServiceRoleKey = () => process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+const supabaseBucket = () => (process.env.SUPABASE_STORAGE_BUCKET || 'receipts').trim();
+
+const isConfigured = () => Boolean(supabaseUrl() && supabaseServiceRoleKey());
 
 const sanitizeFileName = (name) => String(name || 'archivo')
   .toLowerCase()
@@ -43,19 +52,29 @@ export const uploadReceipt = async ({ buffer, mimetype, originalname }, ownerUse
     throw error;
   }
 
-  const bucket = process.env.SUPABASE_STORAGE_BUCKET || 'receipts';
-  const baseUrl = process.env.SUPABASE_URL.replace(/\/$/, '');
+  const bucket = supabaseBucket();
+  const baseUrl = supabaseUrl().replace(/\/$/, '');
   const path = `${ownerUserId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${sanitizeFileName(originalname)}`;
 
-  const response = await fetch(`${baseUrl}/storage/v1/object/${bucket}/${path}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-      'Content-Type': mimetype,
-      'x-upsert': 'false',
-    },
-    body: buffer,
-  });
+  let response;
+  try {
+    response = await fetch(`${baseUrl}/storage/v1/object/${bucket}/${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${supabaseServiceRoleKey()}`,
+        'Content-Type': mimetype,
+        'x-upsert': 'false',
+      },
+      body: buffer,
+    });
+  } catch (cause) {
+    // TypeError de fetch/Headers acá casi siempre es una credencial con
+    // un carácter inválido (salto de línea, comillas de más al pegarla)
+    // o una SUPABASE_URL mal formada — no un problema del archivo.
+    const error = new Error(`No se pudo conectar con Supabase Storage: ${cause.message}. Revisa que SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY no tengan espacios ni saltos de línea de más.`);
+    error.code = 'STORAGE_UPLOAD_FAILED';
+    throw error;
+  }
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
