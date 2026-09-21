@@ -1,70 +1,88 @@
-// Suscripción Pro vía Stripe Checkout. La app nunca ve ni guarda
-// números de tarjeta: Stripe aloja el formulario de pago y solo nos
-// avisa por webhook cuándo un usuario queda activo/vencido.
+// Suscripción Pro vía Wompi (pasarela colombiana de Bancolombia).
+// Stripe no acepta cuentas de comercio colombianas sin registrar una
+// empresa en el exterior, así que se usa Wompi en su lugar.
+//
+// A diferencia de Stripe, Wompi no tiene un objeto "suscripción": cada
+// pago es una transacción suelta contra su Web Checkout (hosteado por
+// Wompi — la app nunca ve el número de tarjeta). Por eso el modelo
+// aquí es "un pago activa/renueva 30 días de Pro", no una suscripción
+// que se cobra sola cada mes; el usuario vuelve a pagar cuando le
+// avisamos que está por vencerse. Cobro automático recurrente (tarjeta
+// tokenizada + recargo mensual sin intervención) queda como mejora
+// futura documentada, no a medio implementar aquí.
 //
 // Variables de entorno requeridas:
-//   STRIPE_SECRET_KEY     — clave secreta de la cuenta de Stripe.
-//   STRIPE_PRICE_ID       — id del price recurrente ("Mi Vaquita Pro").
-//   STRIPE_WEBHOOK_SECRET — firma del webhook, para verificar que el
-//                            evento viene realmente de Stripe.
-//   FRONTEND_URL          — para armar success_url/cancel_url.
-//
-// Si STRIPE_SECRET_KEY no está configurada, se lanza un error claro en
-// vez de fallar de forma críptica — igual que email.service.js con
-// Resend.
-import Stripe from 'stripe';
-import UsersModel from '../database/users.model.js';
+//   WOMPI_PUBLIC_KEY      — clave pública del comercio en Wompi.
+//   WOMPI_INTEGRITY_SECRET — secreto de integridad, para firmar cada
+//                             checkout (Ajustes > Secretos, en el
+//                             dashboard de Wompi).
+//   WOMPI_EVENTS_SECRET    — secreto de eventos, para verificar que un
+//                             webhook realmente viene de Wompi.
+//   WOMPI_PRICE_COP        — precio mensual de Pro en pesos (sin
+//                             centavos), ej. 4900.
+//   FRONTEND_URL           — para armar la URL de retorno tras pagar.
+import crypto from 'crypto';
 import SubscriptionsModel from '../database/subscriptions.model.js';
 
 const subscriptionsModel = SubscriptionsModel();
-const usersModel = UsersModel();
 
-let stripeClient = null;
-const getStripe = () => {
-  const secretKey = process.env.STRIPE_SECRET_KEY;
-  if (!secretKey) {
-    const error = new Error('La facturación no está configurada en el servidor (falta STRIPE_SECRET_KEY)');
+const WOMPI_CHECKOUT_URL = 'https://checkout.wompi.co/p/';
+const PLAN_DURATION_DAYS = 30;
+const ACTIVE_STATUSES = new Set(['active']);
+
+const requireEnv = (name) => {
+  const value = process.env[name];
+  if (!value) {
+    const error = new Error(`La facturación no está configurada en el servidor (falta ${name})`);
     error.code = 'BILLING_NOT_CONFIGURED';
     throw error;
   }
-  if (!stripeClient) stripeClient = new Stripe(secretKey);
-  return stripeClient;
+  return value;
 };
 
-// Son las que Stripe reporta mientras el usuario debe seguir teniendo
-// acceso Pro; cualquier otro estado (canceled, unpaid, past_due...) no
-// cuenta como Pro vigente.
-const ACTIVE_STATUSES = new Set(['active', 'trialing']);
+// El userId va codificado en la referencia (no hay "cliente" en Wompi
+// que lo cargue por nosotros); se recupera al procesar el webhook.
+const buildReference = (userId) => `mivaquita-pro-${userId}-${Date.now()}`;
+const parseUserIdFromReference = (reference) => {
+  const match = /^mivaquita-pro-(\d+)-\d+$/.exec(reference || '');
+  return match ? Number(match[1]) : null;
+};
 
 const createCheckoutSession = async (userId) => {
-  const stripe = getStripe();
-  const priceId = process.env.STRIPE_PRICE_ID;
-  if (!priceId) {
-    const error = new Error('La facturación no está configurada en el servidor (falta STRIPE_PRICE_ID)');
-    error.code = 'BILLING_NOT_CONFIGURED';
-    throw error;
-  }
-
-  const user = await usersModel.getByIdUsersModel(userId);
-  const existing = await subscriptionsModel.getByUserIdModel(userId);
+  const publicKey = requireEnv('WOMPI_PUBLIC_KEY');
+  const integritySecret = requireEnv('WOMPI_INTEGRITY_SECRET');
+  const priceCop = Number(requireEnv('WOMPI_PRICE_COP'));
   const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
 
-  const session = await stripe.checkout.sessions.create({
-    mode: 'subscription',
-    customer: existing?.stripe_customer_id,
-    customer_email: existing?.stripe_customer_id ? undefined : user.email,
-    client_reference_id: String(userId),
-    line_items: [{ price: priceId, quantity: 1 }],
-    success_url: `${frontendUrl}/precios?checkout=success`,
-    cancel_url: `${frontendUrl}/precios?checkout=cancel`,
+  const reference = buildReference(userId);
+  const amountInCents = Math.round(priceCop * 100);
+  const currency = 'COP';
+  // Firma de integridad exigida por Wompi: sha256("<reference><amount><currency><secreto>").
+  const signature = crypto
+    .createHash('sha256')
+    .update(`${reference}${amountInCents}${currency}${integritySecret}`)
+    .digest('hex');
+
+  const params = new URLSearchParams({
+    'public-key': publicKey,
+    currency,
+    'amount-in-cents': String(amountInCents),
+    reference,
+    'signature:integrity': signature,
+    'redirect-url': `${frontendUrl}/precios?checkout=return`,
   });
 
-  return { url: session.url };
+  return { url: `${WOMPI_CHECKOUT_URL}?${params.toString()}` };
 };
 
 const getStatus = async (userId) => {
   const subscription = await subscriptionsModel.getByUserIdModel(userId);
-  const isPro = Boolean(subscription && ACTIVE_STATUSES.has(subscription.status));
+  const isPro = Boolean(
+    subscription
+    && ACTIVE_STATUSES.has(subscription.status)
+    && subscription.current_period_end
+    && new Date(subscription.current_period_end) > new Date()
+  );
   return {
     isPro,
     status: subscription?.status ?? 'none',
@@ -73,57 +91,53 @@ const getStatus = async (userId) => {
 };
 
 const isUserPro = async (userId) => {
-  const subscription = await subscriptionsModel.getByUserIdModel(userId);
-  return Boolean(subscription && ACTIVE_STATUSES.has(subscription.status));
+  const { isPro } = await getStatus(userId);
+  return isPro;
 };
 
-// Un solo Checkout Session trae al usuario que la inició
-// (client_reference_id) y al Customer que Stripe crea/reutiliza; con
-// eso alcanza para la primera fila. Las actualizaciones posteriores
-// (renovación, cancelación) llegan como customer.subscription.* y ya
-// no traen client_reference_id, por eso se buscan por
-// stripe_customer_id en vez de asumir que siempre viene el userId.
-const upsertFromSubscriptionObject = async (subscriptionObject, userId) => {
-  const resolvedUserId = userId
-    ?? (await subscriptionsModel.getByStripeCustomerIdModel(subscriptionObject.customer))?.user_id;
-  if (!resolvedUserId) return;
-
-  const periodEndSeconds = subscriptionObject.current_period_end;
-  await subscriptionsModel.upsertSubscriptionModel({
-    userId: resolvedUserId,
-    stripeCustomerId: subscriptionObject.customer,
-    stripeSubscriptionId: subscriptionObject.id,
-    status: subscriptionObject.status,
-    currentPeriodEnd: periodEndSeconds ? new Date(periodEndSeconds * 1000) : null,
+// Recorre signature.properties (ej. ["transaction.id","transaction.status","transaction.amount_in_cents"]),
+// toma cada valor del payload por esa ruta ("transaction.id" -> data.transaction.id),
+// y concatena: valores + timestamp del evento + secreto de eventos.
+const computeChecksum = (event, eventsSecret) => {
+  const values = (event.signature?.properties || []).map((path) => {
+    const keys = path.split('.');
+    return keys.reduce((node, key) => node?.[key], event.data);
   });
+  const raw = `${values.join('')}${event.timestamp}${eventsSecret}`;
+  return crypto.createHash('sha256').update(raw).digest('hex');
 };
 
-const handleWebhookEvent = async (rawBody, signature) => {
-  const stripe = getStripe();
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!webhookSecret) {
-    const error = new Error('La facturación no está configurada en el servidor (falta STRIPE_WEBHOOK_SECRET)');
-    error.code = 'BILLING_NOT_CONFIGURED';
+const handleWebhookEvent = async (event) => {
+  const eventsSecret = requireEnv('WOMPI_EVENTS_SECRET');
+
+  const expectedChecksum = computeChecksum(event, eventsSecret);
+  const receivedChecksum = String(event.signature?.checksum || '');
+  if (expectedChecksum.toLowerCase() !== receivedChecksum.toLowerCase()) {
+    const error = new Error('Firma de webhook inválida');
+    error.code = 'INVALID_SIGNATURE';
     throw error;
   }
-  const event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
 
-  switch (event.type) {
-    case 'checkout.session.completed': {
-      const session = event.data.object;
-      if (session.mode !== 'subscription') break;
-      const subscription = await stripe.subscriptions.retrieve(session.subscription);
-      await upsertFromSubscriptionObject(subscription, Number(session.client_reference_id) || undefined);
-      break;
-    }
-    case 'customer.subscription.updated':
-    case 'customer.subscription.deleted': {
-      await upsertFromSubscriptionObject(event.data.object);
-      break;
-    }
-    default:
-      break;
+  if (event.event !== 'transaction.updated') return { received: true };
+
+  const transaction = event.data.transaction;
+  const userId = parseUserIdFromReference(transaction.reference);
+  if (!userId) return { received: true };
+
+  if (transaction.status !== 'APPROVED') {
+    // No pisa una suscripción activa por un intento fallido/duplicado;
+    // solo registra el pago aprobado.
+    return { received: true };
   }
+
+  const currentPeriodEnd = new Date(Date.now() + PLAN_DURATION_DAYS * 24 * 60 * 60 * 1000);
+  await subscriptionsModel.upsertSubscriptionModel({
+    userId,
+    externalReference: transaction.reference,
+    externalTransactionId: transaction.id,
+    status: 'active',
+    currentPeriodEnd,
+  });
 
   return { received: true };
 };

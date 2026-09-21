@@ -155,19 +155,45 @@ const queries = [
   `CREATE TABLE IF NOT EXISTS InventoryMovements (id SERIAL PRIMARY KEY, product_id INTEGER NOT NULL REFERENCES InventoryProducts(id) ON DELETE CASCADE, kind VARCHAR(20) NOT NULL CHECK(kind IN ('initial','entry','sale','loss','adjustment')), quantity NUMERIC(12,3) NOT NULL CHECK(quantity <> 0), unit_price NUMERIC(12,2), note VARCHAR(240), recorded_by INTEGER NOT NULL REFERENCES Users(id), created_at TIMESTAMP NOT NULL DEFAULT NOW());`,
   `CREATE TABLE IF NOT EXISTS NatilleraLedger (id SERIAL PRIMARY KEY, natillera_id INTEGER NOT NULL REFERENCES Natilleras(id) ON DELETE CASCADE, activity_id INTEGER REFERENCES Activities(id), kind VARCHAR(30) NOT NULL CHECK(kind IN ('activity_profit','general_expense','late_fee','adjustment')), amount NUMERIC(12,2) NOT NULL CHECK(amount <> 0), description VARCHAR(240) NOT NULL, recorded_by INTEGER NOT NULL REFERENCES Users(id), created_at TIMESTAMP NOT NULL DEFAULT NOW());`,
   `CREATE TABLE IF NOT EXISTS AuditLog (id BIGSERIAL PRIMARY KEY, actor_user_id INTEGER REFERENCES Users(id), actor_guest_id INTEGER REFERENCES Guests(id), scope_type VARCHAR(30) NOT NULL, scope_id INTEGER NOT NULL, action VARCHAR(60) NOT NULL, before_data JSONB, after_data JSONB, created_at TIMESTAMP NOT NULL DEFAULT NOW());`,
-  // Suscripción Pro (Stripe Checkout). Una fila por usuario; se
-  // actualiza vía webhook de Stripe, nunca directamente desde el
-  // frontend. status refleja el estado que reporta Stripe
-  // (active/trialing cuentan como Pro vigente; el resto no).
+  // Suscripción Pro. Una fila por usuario; se actualiza vía webhook
+  // del proveedor de pago (Wompi), nunca directamente desde el
+  // frontend. status 'active' cuenta como Pro vigente mientras
+  // current_period_end no haya pasado; el resto no.
+  //
+  // Wompi no tiene un objeto "suscripción" ni "cliente" como Stripe:
+  // cada pago es una transacción suelta con su propia referencia. Por
+  // eso external_reference/external_transaction_id identifican la
+  // ÚLTIMA transacción que activó/renovó el plan, no una suscripción
+  // recurrente real — hoy la renovación es que el usuario vuelva a
+  // pagar antes de que venza current_period_end (ver billing.service.js).
   `CREATE TABLE IF NOT EXISTS Subscriptions (
     user_id INTEGER PRIMARY KEY REFERENCES Users(id),
-    stripe_customer_id VARCHAR(64) NOT NULL,
-    stripe_subscription_id VARCHAR(64),
+    external_reference VARCHAR(64) NOT NULL,
+    external_transaction_id VARCHAR(64),
     status VARCHAR(20) NOT NULL DEFAULT 'incomplete',
     current_period_end TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
   );`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS subscriptions_stripe_customer_unique ON Subscriptions(stripe_customer_id);`,
+  // Esta tabla se creó originalmente pensada para Stripe (Colombia no
+  // es un país soportado por Stripe para cuentas de comercio); estas
+  // dos migraciones renombran las columnas en bases de datos donde ya
+  // se había creado con los nombres viejos, sin perder los datos.
+  `DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='subscriptions' AND column_name='stripe_customer_id') THEN
+      ALTER TABLE Subscriptions RENAME COLUMN stripe_customer_id TO external_reference;
+    END IF;
+  END $$;`,
+  `DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='subscriptions' AND column_name='stripe_subscription_id') THEN
+      ALTER TABLE Subscriptions RENAME COLUMN stripe_subscription_id TO external_transaction_id;
+    END IF;
+  END $$;`,
+  // Con Stripe un customer_id identificaba a una sola persona para
+  // siempre, así que tenía sentido que fuera único. Con Wompi,
+  // external_reference cambia en cada renovación (es la referencia de
+  // esa transacción puntual), así que un índice único sobre esa
+  // columna ya no protege nada real.
+  `DROP INDEX IF EXISTS subscriptions_stripe_customer_unique;`,
   `CREATE TABLE IF NOT EXISTS ReminderPreferences (
     user_id INTEGER PRIMARY KEY REFERENCES Users(id) ON DELETE CASCADE,
     in_app_enabled BOOLEAN NOT NULL DEFAULT TRUE,

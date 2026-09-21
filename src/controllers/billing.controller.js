@@ -30,17 +30,17 @@ export const getStatusController = async (req, res) => {
   }
 };
 
-// req.body llega como Buffer crudo (ver billing.router.js /webhook
-// montado con express.raw): Stripe firma el body exacto que envía, así
-// que si express.json() lo parsea y reserializa primero, la firma ya
-// no calza y constructEvent siempre falla.
+// Wompi firma sobre valores puntuales del JSON (ver signature.properties
+// en billing.service.js), no sobre el byte-string crudo del body como
+// Stripe — así que a diferencia de Stripe, este endpoint puede vivir
+// detrás del express.json() normal de app.js sin problema.
 export const webhookController = async (req, res) => {
   try {
-    await billingService.handleWebhookEvent(req.body, req.headers['stripe-signature']);
+    await billingService.handleWebhookEvent(req.body);
     res.status(StatusCodes.OK).json({ received: true });
   } catch (error) {
     if (respondNotConfigured(res, error)) return;
-    console.error('Stripe webhook signature/processing error:', error.message);
+    console.error('Wompi webhook signature/processing error:', error.message);
     res.status(StatusCodes.BAD_REQUEST).json({ message: 'Webhook inválido' });
   }
 };
