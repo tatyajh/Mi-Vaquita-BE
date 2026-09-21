@@ -1,6 +1,8 @@
 import { StatusCodes } from 'http-status-codes';
 import billingService from '../services/billing.service.js';
 
+const billingEnabled = () => process.env.BILLING_ENABLED === 'true';
+
 const respondNotConfigured = (res, error) => {
   if (error.code === 'BILLING_NOT_CONFIGURED') {
     res.status(StatusCodes.NOT_IMPLEMENTED).json({ message: error.message, configured: false });
@@ -10,6 +12,12 @@ const respondNotConfigured = (res, error) => {
 };
 
 export const createCheckoutController = async (req, res) => {
+  if (!billingEnabled()) {
+    return res.status(StatusCodes.SERVICE_UNAVAILABLE).json({
+      message: 'Los pagos están deshabilitados durante el piloto gratuito.',
+      code: 'BILLING_DISABLED',
+    });
+  }
   try {
     const { url } = await billingService.createCheckoutSession(req.userId);
     res.status(StatusCodes.OK).json({ url });
@@ -23,7 +31,7 @@ export const createCheckoutController = async (req, res) => {
 export const getStatusController = async (req, res) => {
   try {
     const status = await billingService.getStatus(req.userId);
-    res.status(StatusCodes.OK).json(status);
+    res.status(StatusCodes.OK).json({ ...status, billingEnabled: billingEnabled() });
   } catch (error) {
     console.error('Failed to get billing status:', error);
     res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: 'Internal server error' });

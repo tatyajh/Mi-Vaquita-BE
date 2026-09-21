@@ -8,6 +8,12 @@ dominio verificado en Resend. Si falta una variable de correo, la API conserva
 la respuesta genérica de recuperación para no revelar cuentas, pero registra
 un error interno y no simula un envío exitoso.
 
+El piloto debe ejecutarse con `BILLING_ENABLED=false`. Así se conserva la
+integración histórica de Wompi, pero el servidor bloquea nuevos checkouts.
+Las sesiones usan un token de acceso de 15 minutos y una cookie de renovación
+HttpOnly de 30 días; cambiar la contraseña o dar de baja la cuenta revoca las
+sesiones renovables existentes.
+
 Las rutas ampliadas están bajo `/api/community`: actividades independientes,
 participantes registrados o invitados, invitaciones con PIN, recaudos,
 inventario, sorteos privados y consulta limitada para invitados. Las rutas

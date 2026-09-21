@@ -83,10 +83,12 @@ const UsersModel = () => {
       'UPDATE users SET password = $1, reset_token = NULL, reset_token_expires = NULL WHERE id = $2',
       [hashedPassword, userId]
     );
+    await pool.query('UPDATE UserSessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [userId]);
   };
 
   const softDeleteUserModel = async (userId) => {
     await pool.query('UPDATE users SET deleted_at = NOW() WHERE id = $1', [userId]);
+    await pool.query('UPDATE UserSessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [userId]);
   };
 
   return {

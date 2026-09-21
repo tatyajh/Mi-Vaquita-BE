@@ -1,8 +1,8 @@
 import UserService from "../services/users.service.js";
 import { StatusCodes } from "http-status-codes";
 import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
 import { NotFoundException } from "../validations/users.validations.js";
+import { clearRefreshCookie, createSession, readRefreshCookie, refreshCookie, revokeSession, rotateSession } from '../services/session.service.js';
 
 const userService = UserService();
 
@@ -41,14 +41,13 @@ export const loginController = async (req, res) => {
         .json({ message: "Correo o contraseña incorrectos" });
     }
 
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
-      expiresIn: "1h",
-    });
+    const { accessToken: token, refreshToken } = await createSession({ userId: user.id, userAgent: req.headers['user-agent'], ipAddress: req.ip });
 
     // Nunca se manda el hash de la contraseña ni los campos de
     // recuperación de contraseña al cliente — `user` sale de un
     // `SELECT *`, así que hay que filtrarlos a mano.
     const safeUser = { id: user.id, name: user.name, email: user.email, createdat: user.createdat };
+    res.setHeader('Set-Cookie', refreshCookie(refreshToken));
     res.status(StatusCodes.OK).json({ token, user: safeUser });
   } catch (error) {
     console.error("Error al iniciar sesión:", error);
@@ -56,6 +55,24 @@ export const loginController = async (req, res) => {
       .status(StatusCodes.INTERNAL_SERVER_ERROR)
       .json({ message: "Internal server error" });
   }
+};
+
+export const refreshSessionController = async (req, res) => {
+  try {
+    const result = await rotateSession(readRefreshCookie(req), { userAgent: req.headers['user-agent'], ipAddress: req.ip });
+    if (!result) return res.status(StatusCodes.UNAUTHORIZED).json({ message: 'La sesión venció' });
+    res.setHeader('Set-Cookie', refreshCookie(result.refreshToken));
+    res.json({ token: result.accessToken });
+  } catch (error) {
+    console.error('Error al renovar sesión:', error);
+    res.status(StatusCodes.UNAUTHORIZED).json({ message: 'No se pudo renovar la sesión' });
+  }
+};
+
+export const logoutController = async (req, res) => {
+  await revokeSession(readRefreshCookie(req));
+  res.setHeader('Set-Cookie', clearRefreshCookie());
+  res.status(StatusCodes.NO_CONTENT).end();
 };
 
 // getByEmail lanza NotFoundException si el correo no existe (o está

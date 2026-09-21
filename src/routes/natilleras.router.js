@@ -105,6 +105,39 @@ router.get('/loans/mine',async(req,res)=>{
   const today=new Date().toISOString().slice(0,10);
   res.json(loans.map(loan=>{const ownPayments=payments.filter(p=>p.loan_id===loan.id),progress=loanProgress(loan,ownPayments),schedule=loanSchedule(installments.filter(i=>i.loan_id===loan.id),progress.repaid,today);return {...loan,...progress,balance:money(progress.capitalPending+progress.interestPending),isExternal:!(loan.is_member),payments:ownPayments,schedule};}));
 });
+router.get('/legal-rates/current',async(req,res)=>{
+  const on=/^\d{4}-\d{2}-\d{2}$/.test(req.query.on||'')?req.query.on:new Date().toISOString().slice(0,10);
+  const {rows}=await pool.query('SELECT * FROM LegalInterestRates WHERE valid_from<=$1 AND valid_to>=$1 ORDER BY valid_from DESC LIMIT 1',[on]);
+  res.json(rows[0]||null);
+});
+router.post('/:id/members',async(req,res)=>{
+  const userId=Number(req.body.userId),role=req.body.role||'member';
+  if(!Number.isInteger(userId)||!['admin','treasurer','member','viewer'].includes(role))return bad(res,'Integrante o rol inválido');
+  try{const participant=await transaction(async client=>{
+    const n=await context(client,req.params.id,req.userId,true);
+    if(!n||n.owner_id!==req.userId||n.status!=='active')throw new Error('Solo la administración puede agregar integrantes');
+    const user=(await client.query('SELECT id,name,email FROM Users WHERE id=$1 AND deleted_at IS NULL',[userId])).rows[0];
+    if(!user)throw new Error('La persona debe tener una cuenta activa');
+    await client.query('INSERT INTO NatilleraMembers(natillera_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING',[n.id,userId]);
+    const row=(await client.query('INSERT INTO NatilleraParticipants(natillera_id,user_id,role) VALUES($1,$2,$3) ON CONFLICT(natillera_id,user_id) WHERE user_id IS NOT NULL DO UPDATE SET role=EXCLUDED.role RETURNING *',[n.id,userId,role])).rows[0];
+    await client.query("INSERT INTO AuditLog(actor_user_id,scope_type,scope_id,action,after_data) VALUES($1,'natillera',$2,'member_added',$3)",[req.userId,n.id,JSON.stringify({userId,role})]);
+    return {...row,name:user.name,email:user.email};
+  });res.status(201).json(participant);}catch(error){bad(res,error.message);}
+});
+router.patch('/:id/participants/:participantId/role',async(req,res)=>{
+  const role=req.body.role;
+  if(!['admin','treasurer','member','viewer'].includes(role))return bad(res,'Rol inválido');
+  try{const row=await transaction(async client=>{
+    const n=await context(client,req.params.id,req.userId,true);
+    if(!n||n.owner_id!==req.userId||n.status!=='active')throw new Error('Solo la administración puede cambiar roles');
+    const participant=(await client.query('SELECT * FROM NatilleraParticipants WHERE id=$1 AND natillera_id=$2 FOR UPDATE',[req.params.participantId,n.id])).rows[0];
+    if(!participant)throw new Error('Participante no encontrado');
+    if(Number(participant.user_id)===Number(n.owner_id)&&role!=='admin')throw new Error('La persona propietaria debe conservar el rol de administración');
+    const updated=(await client.query('UPDATE NatilleraParticipants SET role=$1 WHERE id=$2 RETURNING *',[role,participant.id])).rows[0];
+    await client.query("INSERT INTO AuditLog(actor_user_id,scope_type,scope_id,action,before_data,after_data) VALUES($1,'natillera',$2,'role_changed',$3,$4)",[req.userId,n.id,JSON.stringify({participantId:participant.id,role:participant.role}),JSON.stringify({participantId:participant.id,role})]);
+    return updated;
+  });res.json(row);}catch(error){bad(res,error.message);}
+});
 router.post('/', async (req, res) => {
   const { name, purpose=null, startsOn, endsOn, frequency, contribution, participantIds = [], guestIds = [], profitDistribution='proportional', lateFee=0 } = req.body;
   if (!name?.trim() || !validDate(startsOn) || !validDate(endsOn) || endsOn < startsOn || !['weekly','biweekly','monthly'].includes(frequency) || !Number.isFinite(Number(contribution)) || Number(contribution) <= 0 || !Array.isArray(participantIds) || !Array.isArray(guestIds) || guestIds.length || !['proportional','equal'].includes(profitDistribution) || Number(lateFee)<0) return bad(res, 'La natillera requiere participantes registrados y datos válidos');
@@ -197,7 +230,8 @@ router.post('/:id/loans', async (req,res) => {
         await client.query('INSERT INTO NatilleraLoanInstallments(loan_id,installment_number,due_on,principal_due,interest_due) VALUES($1,$2,$3,$4,$5)',[loan.id,installment,monthDate(loan.issued_on,installment),principalDue,interestDue]);
       }
       await client.query("INSERT INTO AuditLog(actor_user_id,scope_type,scope_id,action,after_data) VALUES($1,'loan',$2,'loan_created',$3)",[req.userId,loan.id,JSON.stringify({natilleraId:n.id,borrowerUserId:Number(userId),external:!d.members.some(m=>m.id===Number(userId)),principal:money(principal),interest})]);
-      return loan;
+      const legalRate=(await client.query('SELECT * FROM LegalInterestRates WHERE valid_from<=CURRENT_DATE AND valid_to>=CURRENT_DATE ORDER BY valid_from DESC LIMIT 1')).rows[0]||null;
+      return {...loan,legalRate,rateWarning:legalRate&&Number(annualRate)>Number(legalRate.annual_effective_rate)?'La tasa registrada supera la referencia legal vigente. Revisa la equivalencia y consulta asesoría antes de continuar.':null};
     }); res.status(201).json(row);
   } catch(error) { bad(res,error.message); }
 });
