@@ -60,7 +60,7 @@ const GroupService = () => {
     return deleted;
   };
 
-  const addParticipants = async (groupId, participantIds) => {
+  const addParticipants = async (groupId, participantIds, actorUserId) => {
     if (!Array.isArray(participantIds) || participantIds.length === 0) {
       throw new Error('Debe indicar al menos un participante');
     }
@@ -71,6 +71,9 @@ const GroupService = () => {
     ]);
     if (!group) {
       throw new NotFoundException(`Group with id ${groupId} does not exist`);
+    }
+    if (Number(group.owneruserid ?? group.ownerUserId) !== Number(actorUserId)) {
+      throw new Error('Solo la persona administradora puede agregar integrantes');
     }
 
     const existingIds = new Set(existingParticipants.map(p => p.id));
@@ -84,7 +87,7 @@ const GroupService = () => {
       );
     }
 
-    return groupModel.addParticipants(groupId, participantIds);
+    return groupModel.addParticipants(groupId, newIds);
   };
 
   const getParticipants = async (groupId) => {

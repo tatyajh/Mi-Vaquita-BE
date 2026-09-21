@@ -71,7 +71,7 @@ export const removeByIdGroupsController = async (req, res) => {
 export const addGroupParticipantsController = async (req, res) => {
   const { groupId, participantIds } = req.body;
   try {
-    await groupService.addParticipants(groupId, participantIds);
+    await groupService.addParticipants(groupId, participantIds, req.userId);
     res.status(StatusCodes.CREATED).json({ message: 'Participants added successfully' });
   } catch (error) {
     if (error instanceof ConflictException || error instanceof NotFoundException) {

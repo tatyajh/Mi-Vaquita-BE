@@ -95,9 +95,12 @@ const GroupsModel = () => {
       const newParticipantIds = participantIds.filter(id => !existingParticipantIds.includes(id));
   
       if (newParticipantIds.length > 0) {
-        const insertValues = newParticipantIds.map(userId => `(${groupId}, ${userId})`).join(',');
-        const query = `INSERT INTO GroupParticipants (group_id, user_id) VALUES ${insertValues}`;
-        await client.query(query);
+        await client.query(
+          `INSERT INTO GroupParticipants (group_id, user_id)
+           SELECT $1, user_id FROM unnest($2::int[]) AS user_id
+           ON CONFLICT DO NOTHING`,
+          [groupId, newParticipantIds]
+        );
       }
     } finally {
       client.release();
