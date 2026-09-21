@@ -74,7 +74,20 @@ const ExpensesService = () => {
     ]);
 
     const total = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
-    const share = members.length > 0 ? total / members.length : 0;
+    const totalCents = Math.round(total * 100);
+    const memberCount = members.length;
+    const share = memberCount > 0 ? total / memberCount : 0;
+
+    // $100 entre 3 no es $33.33 exactos (33.33×3 = 99.99, falta un
+    // centavo): redondear la misma "share" para cada miembro dejaba a
+    // quien pagó recibiendo un centavo menos de lo real (los saldos no
+    // sumaban exactamente cero). Se reparte el total en centavos
+    // enteros y el sobrante (siempre < memberCount centavos) se le
+    // asigna a los primeros miembros del grupo, así la suma de las
+    // partes es EXACTAMENTE el total.
+    const baseShareCents = memberCount > 0 ? Math.floor(totalCents / memberCount) : 0;
+    const remainderCents = memberCount > 0 ? totalCents - baseShareCents * memberCount : 0;
+    const shareCentsByMember = new Map(members.map((m, i) => [m.id, baseShareCents + (i < remainderCents ? 1 : 0)]));
 
     const paidByMember = new Map(members.map(m => [m.id, 0]));
     for (const expense of expenses) {
@@ -82,13 +95,17 @@ const ExpensesService = () => {
       paidByMember.set(expense.paid_by_user_id, current + Number(expense.amount));
     }
 
-    const balances = members.map(member => ({
-      userId: member.id,
-      name: member.name,
-      email: member.email,
-      paid: Math.round((paidByMember.get(member.id) ?? 0) * 100) / 100,
-      balance: Math.round(((paidByMember.get(member.id) ?? 0) - share) * 100) / 100,
-    }));
+    const balances = members.map(member => {
+      const paidCents = Math.round((paidByMember.get(member.id) ?? 0) * 100);
+      const shareCents = shareCentsByMember.get(member.id) ?? 0;
+      return {
+        userId: member.id,
+        name: member.name,
+        email: member.email,
+        paid: paidCents / 100,
+        balance: (paidCents - shareCents) / 100,
+      };
+    });
 
     const settlements = settleUp(balances);
 

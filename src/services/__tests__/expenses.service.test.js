@@ -72,18 +72,27 @@ describe('expenses.service getBalances/settleUp', () => {
     expect(result.settlements.every(s => s.to.userId === 1)).toBe(true);
   });
 
-  it('rounds amounts that do not divide evenly without leaving unsettled cents', async () => {
+  // $100 entre 3 no reparte exacto ($33.33 × 3 = $99.99, falta un
+  // centavo). Antes, cada balance se redondeaba por separado y la
+  // suma de liquidaciones quedaba SIEMPRE un centavo corta de lo que
+  // el balance decía que le debían a quien pagó — un reporte externo
+  // (auditoría de Codex) lo detectó probando exactamente este caso.
+  it('distributes the leftover cent so settlements sum to exactly what the payer is owed, not a cent short', async () => {
     getAllByGroupModel.mockResolvedValueOnce([
       { paid_by_user_id: 1, amount: '100.00' },
     ]);
 
     const result = await expensesService.getBalances(1, 1);
 
-    // 100 / 3 = 33.33... -> share se redondea a 33.33, y las
-    // liquidaciones deben seguir sumando (casi) el total repartido.
     expect(result.share).toBeCloseTo(33.33, 2);
+    // Invariante que debe cumplirse siempre: los saldos de todo el
+    // grupo suman exactamente cero (nadie se queda con, ni le falta,
+    // un centavo que no salió de ningún lado).
+    const sumOfBalances = result.balances.reduce((sum, b) => sum + b.balance, 0);
+    expect(sumOfBalances).toBeCloseTo(0, 2);
+    const payerBalance = result.balances.find(b => b.userId === 1).balance;
     const totalSettled = result.settlements.reduce((sum, s) => sum + s.amount, 0);
-    expect(totalSettled).toBeCloseTo(66.66, 1);
+    expect(totalSettled).toBe(payerBalance);
   });
 
   it('produces no settlements when there are no expenses', async () => {
