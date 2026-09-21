@@ -56,6 +56,7 @@ describe('billing.service.handleWebhookEvent', () => {
   beforeEach(() => {
     process.env = { ...originalEnv, WOMPI_EVENTS_SECRET: ENV.WOMPI_EVENTS_SECRET };
     upsertSubscriptionModel.mockClear();
+    getByUserIdModel.mockReset();
   });
   afterEach(() => { process.env = originalEnv; });
 
@@ -116,5 +117,39 @@ describe('billing.service.handleWebhookEvent', () => {
     await billingService.handleWebhookEvent(event);
 
     expect(upsertSubscriptionModel).not.toHaveBeenCalled();
+  });
+
+  // Wompi reintenta el mismo evento hasta 3 veces si no respondemos a
+  // tiempo, y alguien podría reenviar manualmente un evento capturado
+  // de los logs mucho después. Sin este chequeo, cualquiera de los dos
+  // casos volvía a poner current_period_end en "ahora + 30 días",
+  // extendiendo el plan Pro indefinidamente a partir de un solo pago.
+  it('ignores a replayed webhook for a transaction already processed', async () => {
+    getByUserIdModel.mockResolvedValue({ user_id: 7, external_transaction_id: 'wompi-tx-4', status: 'active' });
+    const event = buildEvent({
+      id: 'wompi-tx-4',
+      status: 'APPROVED',
+      amount_in_cents: 490000,
+      reference: 'mivaquita-pro-7-1699999999999',
+    });
+
+    await billingService.handleWebhookEvent(event);
+
+    expect(upsertSubscriptionModel).not.toHaveBeenCalled();
+  });
+
+  it('still processes a genuinely new payment even if the user already has an active subscription', async () => {
+    getByUserIdModel.mockResolvedValue({ user_id: 7, external_transaction_id: 'wompi-tx-old', status: 'active' });
+    const event = buildEvent({
+      id: 'wompi-tx-new',
+      status: 'APPROVED',
+      amount_in_cents: 490000,
+      reference: 'mivaquita-pro-7-1700000000000',
+    });
+
+    await billingService.handleWebhookEvent(event);
+
+    expect(upsertSubscriptionModel).toHaveBeenCalledTimes(1);
+    expect(upsertSubscriptionModel.mock.calls[0][0].externalTransactionId).toBe('wompi-tx-new');
   });
 });

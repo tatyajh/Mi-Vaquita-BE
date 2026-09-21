@@ -130,6 +130,16 @@ const handleWebhookEvent = async (event) => {
     return { received: true };
   }
 
+  // Wompi reintenta el mismo evento hasta 3 veces si no respondemos
+  // 200 a tiempo, y un evento capturado (logs/dashboard) se podría
+  // reenviar manualmente después — sin este chequeo, cualquiera de los
+  // dos casos volvía a correr los 30 días desde "ahora", extendiendo
+  // el plan Pro indefinidamente a partir de un solo pago real.
+  const existing = await subscriptionsModel.getByUserIdModel(userId);
+  if (existing?.external_transaction_id === String(transaction.id)) {
+    return { received: true };
+  }
+
   const currentPeriodEnd = new Date(Date.now() + PLAN_DURATION_DAYS * 24 * 60 * 60 * 1000);
   await subscriptionsModel.upsertSubscriptionModel({
     userId,
