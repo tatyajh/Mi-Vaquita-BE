@@ -8,7 +8,25 @@ const bad = (res, message, code = 400) => res.status(code).json({ message });
 const money = value => Math.round(Number(value) * 100) / 100;
 const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value || '') && !Number.isNaN(Date.parse(value));
 const monthDate=(value,months)=>{const source=value instanceof Date?value.toISOString().slice(0,10):String(value).slice(0,10);const [year,month,day]=source.split('-').map(Number);const target=new Date(Date.UTC(year,month-1+months,1));const last=new Date(Date.UTC(target.getUTCFullYear(),target.getUTCMonth()+1,0)).getUTCDate();target.setUTCDate(Math.min(day,last));return target.toISOString().slice(0,10);};
-const loanProgress=(loan,payments)=>{const capitalPaid=money(payments.reduce((sum,p)=>sum+Number(p.capital_amount??0),0));const interestPaid=money(payments.reduce((sum,p)=>sum+Number(p.interest_amount??0),0));const legacyPaid=money(payments.filter(p=>p.capital_amount==null&&p.interest_amount==null).reduce((sum,p)=>sum+Number(p.amount),0));const legacyCapital=Math.min(Math.max(0,Number(loan.principal)-capitalPaid),legacyPaid);const legacyInterest=Math.max(0,legacyPaid-legacyCapital);return {capitalPaid:money(capitalPaid+legacyCapital),interestPaid:money(interestPaid+legacyInterest),repaid:money(capitalPaid+interestPaid+legacyPaid),capitalPending:money(Math.max(0,Number(loan.principal)-capitalPaid-legacyCapital)),interestPending:money(Math.max(0,Number(loan.interest)-interestPaid-legacyInterest))};};
+// Interés sobre saldo real, no el total fijo calculado al prestar: se
+// acumula desde el último abono (o desde que se prestó, si no ha
+// pagado nada) hasta `today`, sobre lo que TODAVÍA debe de capital.
+// Así, quien paga antes acumula menos días y paga menos interés; un
+// préstamo que se alarga sigue acumulando interés real por el tiempo
+// de más, en vez de quedar "gratis" después del plazo planeado.
+const DAY_MS=24*60*60*1000;
+export const loanProgress=(loan,payments,today=new Date().toISOString().slice(0,10))=>{
+  const capitalPaid=money(payments.reduce((sum,p)=>sum+Number(p.capital_amount??0),0));
+  const interestPaid=money(payments.reduce((sum,p)=>sum+Number(p.interest_amount??0),0));
+  const legacyPaid=money(payments.filter(p=>p.capital_amount==null&&p.interest_amount==null).reduce((sum,p)=>sum+Number(p.amount),0));
+  const legacyCapital=Math.min(Math.max(0,Number(loan.principal)-capitalPaid),legacyPaid);
+  const legacyInterest=Math.max(0,legacyPaid-legacyCapital);
+  const capitalPending=money(Math.max(0,Number(loan.principal)-capitalPaid-legacyCapital));
+  const lastAccrualOn=payments.length?payments[payments.length-1].created_at:loan.issued_on;
+  const daysElapsed=Math.max(0,(new Date(`${today}T12:00:00Z`)-new Date(lastAccrualOn))/DAY_MS);
+  const accruedInterest=money(capitalPending*(Number(loan.annual_rate)/100)*(daysElapsed/365));
+  return {capitalPaid:money(capitalPaid+legacyCapital),interestPaid:money(interestPaid+legacyInterest),repaid:money(capitalPaid+interestPaid+legacyPaid),capitalPending,interestPending:accruedInterest};
+};
 const loanSchedule=(installments,repaid,today)=>{let applied=0;return installments.map(i=>{const due=money(Number(i.principal_due)+Number(i.interest_due)),paid=money(Math.min(due,Math.max(0,Number(repaid)-applied)));applied=money(applied+due);return {...i,due,paid,balance:money(due-paid),status:paid>=due?'paid':i.due_on<today?'overdue':paid>0?'partial':'pending'};});};
 
 async function context(client, id, userId, lock = false) {
@@ -62,7 +80,7 @@ async function detail(client, n) {
   const loanPayments=loanRows.length?(await client.query('SELECT * FROM NatilleraLoanPayments WHERE loan_id=ANY($1::int[]) ORDER BY created_at,id',[loanRows.map(x=>x.id)])).rows:[];
   const loanInstallments=loanRows.length?(await client.query("SELECT *,to_char(due_on,'YYYY-MM-DD') due_on FROM NatilleraLoanInstallments WHERE loan_id=ANY($1::int[]) ORDER BY loan_id,installment_number",[loanRows.map(x=>x.id)])).rows:[];
   const today=new Date().toISOString().slice(0,10);
-  const loans=loanRows.map(l=>{const payments=loanPayments.filter(p=>p.loan_id===l.id),progress=loanProgress(l,payments),installments=loanInstallments.filter(i=>i.loan_id===l.id);return {...l,...progress,balance:money(progress.capitalPending+progress.interestPending),payments,installments,schedule:loanSchedule(installments,progress.repaid,today)};});
+  const loans=loanRows.map(l=>{const payments=loanPayments.filter(p=>p.loan_id===l.id),progress=loanProgress(l,payments,today),installments=loanInstallments.filter(i=>i.loan_id===l.id);return {...l,...progress,balance:money(progress.capitalPending+progress.interestPending),payments,installments,schedule:loanSchedule(installments,progress.repaid,today)};});
   const totalContributions = money(contributions.reduce((s, c) => s + Number(c.amount), 0));
   const totalLoans = money(loans.reduce((s, l) => s + Number(l.principal), 0));
   const totalRepayments = money(loans.reduce((s, l) => s + Number(l.repaid), 0));
@@ -103,7 +121,7 @@ router.get('/loans/mine',async(req,res)=>{
   const payments=ids.length?(await pool.query('SELECT * FROM NatilleraLoanPayments WHERE loan_id=ANY($1::int[]) ORDER BY created_at,id',[ids])).rows:[];
   const installments=ids.length?(await pool.query("SELECT *,to_char(due_on,'YYYY-MM-DD') due_on FROM NatilleraLoanInstallments WHERE loan_id=ANY($1::int[]) ORDER BY loan_id,installment_number",[ids])).rows:[];
   const today=new Date().toISOString().slice(0,10);
-  res.json(loans.map(loan=>{const ownPayments=payments.filter(p=>p.loan_id===loan.id),progress=loanProgress(loan,ownPayments),schedule=loanSchedule(installments.filter(i=>i.loan_id===loan.id),progress.repaid,today);return {...loan,...progress,balance:money(progress.capitalPending+progress.interestPending),isExternal:!(loan.is_member),payments:ownPayments,schedule};}));
+  res.json(loans.map(loan=>{const ownPayments=payments.filter(p=>p.loan_id===loan.id),progress=loanProgress(loan,ownPayments,today),schedule=loanSchedule(installments.filter(i=>i.loan_id===loan.id),progress.repaid,today);return {...loan,...progress,balance:money(progress.capitalPending+progress.interestPending),isExternal:!(loan.is_member),payments:ownPayments,schedule};}));
 });
 router.get('/legal-rates/current',async(req,res)=>{
   const on=/^\d{4}-\d{2}-\d{2}$/.test(req.query.on||'')?req.query.on:new Date().toISOString().slice(0,10);
@@ -220,15 +238,29 @@ router.post('/:id/loans', async (req,res) => {
       if (Number(principal)>d.summary.available) throw new Error('El préstamo supera el dinero disponible');
       const borrower=(await client.query('SELECT id FROM Users WHERE id=$1 AND deleted_at IS NULL',[Number(userId)])).rows[0];
       if(!borrower)throw new Error('El prestatario debe tener una cuenta activa en Mi Vaquita');
-      const interest=money(Number(principal)*Number(annualRate)/100*Number(termMonths)/12);
-      const loan=(await client.query('INSERT INTO NatilleraLoans(natillera_id,user_id,principal,annual_rate,term_months,interest,created_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',[n.id,userId,money(principal),annualRate,termMonths,interest,req.userId])).rows[0];
-      let principalAssigned=0,interestAssigned=0;
+      // El cronograma es una ESTIMACIÓN sobre saldo decreciente (si se
+      // paga puntual mes a mes) para mostrar fechas y montos de
+      // referencia; el interés que realmente se cobra al abonar (ver
+      // loanProgress más abajo) se calcula sobre el tiempo real
+      // transcurrido y el saldo real pendiente, no sobre este plan —
+      // así pagar antes cobra menos interés y un préstamo que se
+      // alarga acumula más, como un préstamo de verdad.
+      const monthlyRate=Number(annualRate)/100/12;
+      let remaining=Number(principal),principalAssigned=0,estimatedInterest=0;
+      const plannedInstallments=[];
       for(let installment=1;installment<=Number(termMonths);installment++){
         const principalDue=installment===Number(termMonths)?money(Number(principal)-principalAssigned):money(Number(principal)/Number(termMonths));
-        const interestDue=installment===Number(termMonths)?money(interest-interestAssigned):money(interest/Number(termMonths));
-        principalAssigned=money(principalAssigned+principalDue);interestAssigned=money(interestAssigned+interestDue);
-        await client.query('INSERT INTO NatilleraLoanInstallments(loan_id,installment_number,due_on,principal_due,interest_due) VALUES($1,$2,$3,$4,$5)',[loan.id,installment,monthDate(loan.issued_on,installment),principalDue,interestDue]);
+        const interestDue=money(remaining*monthlyRate);
+        principalAssigned=money(principalAssigned+principalDue);
+        remaining=money(Math.max(0,remaining-principalDue));
+        estimatedInterest=money(estimatedInterest+interestDue);
+        plannedInstallments.push({installment,principalDue,interestDue});
       }
+      const loan=(await client.query('INSERT INTO NatilleraLoans(natillera_id,user_id,principal,annual_rate,term_months,interest,created_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',[n.id,userId,money(principal),annualRate,termMonths,estimatedInterest,req.userId])).rows[0];
+      for(const p of plannedInstallments){
+        await client.query('INSERT INTO NatilleraLoanInstallments(loan_id,installment_number,due_on,principal_due,interest_due) VALUES($1,$2,$3,$4,$5)',[loan.id,p.installment,monthDate(loan.issued_on,p.installment),p.principalDue,p.interestDue]);
+      }
+      const interest=estimatedInterest;
       await client.query("INSERT INTO AuditLog(actor_user_id,scope_type,scope_id,action,after_data) VALUES($1,'loan',$2,'loan_created',$3)",[req.userId,loan.id,JSON.stringify({natilleraId:n.id,borrowerUserId:Number(userId),external:!d.members.some(m=>m.id===Number(userId)),principal:money(principal),interest})]);
       const legalRate=(await client.query('SELECT * FROM LegalInterestRates WHERE valid_from<=CURRENT_DATE AND valid_to>=CURRENT_DATE ORDER BY valid_from DESC LIMIT 1')).rows[0]||null;
       return {...loan,legalRate,rateWarning:legalRate&&Number(annualRate)>Number(legalRate.annual_effective_rate)?'La tasa registrada supera la referencia legal vigente. Revisa la equivalencia y consulta asesoría antes de continuar.':null};
