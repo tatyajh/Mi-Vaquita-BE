@@ -1,5 +1,5 @@
 import GroupsModel from "../database/groups.model.js";
-import { NotFoundException, ConflictException, ProRequiredException, validateGroup } from "../validations/groups.validations.js";
+import { NotFoundException, ConflictException, ProRequiredException, ForbiddenException, validateGroup } from "../validations/groups.validations.js";
 import { isFreeGroupColor } from "../constants/group-colors.js";
 import billingService from "./billing.service.js";
 
@@ -42,11 +42,31 @@ const GroupService = () => {
     return groupModel.getGroupsForUserModel(userId);
   };
 
-  const getById = async (id) => {
+  // "No existe" para quien no es miembro, aunque el grupo sí exista —
+  // así no se puede usar la respuesta para adivinar ids de grupos
+  // ajenos. Antes esto ni se llamaba: cualquier usuario logueado podía
+  // leer/editar/borrar el grupo de cualquier otro con solo saber el id.
+  const assertMember = async (groupId, userId) => {
+    const { isMember, isOwner } = await groupModel.getMembershipModel(groupId, userId);
+    if (!isMember) {
+      throw new NotFoundException(`Group with id ${groupId} does not exist`);
+    }
+    return { isOwner };
+  };
+
+  const assertOwner = async (groupId, userId) => {
+    const { isOwner } = await assertMember(groupId, userId);
+    if (!isOwner) {
+      throw new ForbiddenException('Solo la persona administradora puede hacer esto');
+    }
+  };
+
+  const getById = async (id, userId) => {
     const group = await groupModel.getByIdGroupsModel(id);
     if (!group) {
       throw new NotFoundException(`Group with id ${id} does not exist`);
     }
+    await assertMember(id, userId);
     return group;
   };
 
@@ -60,12 +80,19 @@ const GroupService = () => {
     if (!existingGroup) {
       throw new NotFoundException(`Group with id ${id} does not exist`);
     }
+    await assertOwner(id, actorUserId);
 
     await assertColorAllowed(groupData.color, actorUserId);
     return groupModel.updateGroupsModel(id, groupData);
   };
 
-  const removeById = async (id) => {
+  const removeById = async (id, actorUserId) => {
+    const existingGroup = await groupModel.getByIdGroupsModel(id);
+    if (!existingGroup) {
+      throw new NotFoundException(`Group with id ${id} does not exist`);
+    }
+    await assertOwner(id, actorUserId);
+
     const deleted = await groupModel.deleteGroupsModel(id);
     if (!deleted) {
       throw new NotFoundException(`Group with id ${id} does not exist`);
@@ -78,16 +105,12 @@ const GroupService = () => {
       throw new Error('Debe indicar al menos un participante');
     }
 
-    const [group, existingParticipants] = await Promise.all([
-      groupModel.getByIdGroupsModel(groupId),
-      groupModel.getParticipants(groupId),
-    ]);
+    const group = await groupModel.getByIdGroupsModel(groupId);
     if (!group) {
       throw new NotFoundException(`Group with id ${groupId} does not exist`);
     }
-    if (Number(group.owneruserid ?? group.ownerUserId) !== Number(actorUserId)) {
-      throw new Error('Solo la persona administradora puede agregar integrantes');
-    }
+    await assertOwner(groupId, actorUserId);
+    const existingParticipants = await groupModel.getParticipants(groupId);
 
     const existingIds = new Set(existingParticipants.map(p => p.id));
     existingIds.add(group.owneruserid ?? group.ownerUserId);
@@ -103,7 +126,8 @@ const GroupService = () => {
     return groupModel.addParticipants(groupId, newIds);
   };
 
-  const getParticipants = async (groupId) => {
+  const getParticipants = async (groupId, userId) => {
+    await assertMember(groupId, userId);
     return groupModel.getParticipants(groupId);
   };
 

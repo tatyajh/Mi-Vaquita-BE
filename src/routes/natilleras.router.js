@@ -74,13 +74,21 @@ async function detail(client, n) {
   const participantSchedule=buildParticipantSchedule(participants,quotas,quotaPayments);
   const activityProfit = money(ledger.filter(x=>x.kind==='activity_profit').reduce((s,x)=>s+Number(x.amount),0));
   const generalExpenses = money(ledger.filter(x=>x.kind==='general_expense').reduce((s,x)=>s+Math.abs(Number(x.amount)),0));
+  // late_fee/adjustment quedaban en el ledger crudo pero nunca sumados
+  // a ningún total: una mora cobrada o una corrección de caja
+  // "existían" en el historial pero no afectaban estimatedProfit ni
+  // available, así que ese dinero real desaparecía de las cuentas al
+  // cerrar la natillera. Se guardan con el signo correcto desde que se
+  // registran (ver community.router.js), así que se suman tal cual.
+  const lateFees = money(ledger.filter(x=>x.kind==='late_fee').reduce((s,x)=>s+Number(x.amount),0));
+  const adjustments = money(ledger.filter(x=>x.kind==='adjustment').reduce((s,x)=>s+Number(x.amount),0));
   const schedule = members.flatMap(m => dueDates(n).map(date => {
     const paid = money(contributions.filter(c => c.user_id === m.id && String(c.due_on).slice(0, 10) === date).reduce((s, c) => s + Number(c.amount), 0));
     const due = Number(n.contribution);
     return { userId: m.id, name: m.name, dueOn: date, due, paid, balance: money(Math.max(0, due - paid)), status: paid >= due ? 'paid' : date < new Date().toISOString().slice(0,10) ? 'overdue' : paid > 0 ? 'partial' : 'pending' };
   }));
   const extendedContributions=money(participants.reduce((s,p)=>s+Number(p.recorded_contributed),0));
-  return { ...n, members, participants, contributions, loans, ledger, quotas, schedule, participantSchedule, summary: { totalContributions:money(totalContributions+extendedContributions), legacyContributions:totalContributions, extendedContributions, totalLoans, totalRepayments, outstanding, collectedInterest, activityProfit, generalExpenses, estimatedProfit:money(collectedInterest+activityProfit-generalExpenses), available: money(totalContributions+extendedContributions-totalLoans+totalRepayments+activityProfit-generalExpenses) } };
+  return { ...n, members, participants, contributions, loans, ledger, quotas, schedule, participantSchedule, summary: { totalContributions:money(totalContributions+extendedContributions), legacyContributions:totalContributions, extendedContributions, totalLoans, totalRepayments, outstanding, collectedInterest, activityProfit, generalExpenses, lateFees, adjustments, estimatedProfit:money(collectedInterest+activityProfit-generalExpenses+lateFees+adjustments), available: money(totalContributions+extendedContributions-totalLoans+totalRepayments+activityProfit-generalExpenses+lateFees+adjustments) } };
 }
 
 router.get('/', async (req, res) => {

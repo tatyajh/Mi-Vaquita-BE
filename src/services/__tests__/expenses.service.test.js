@@ -12,27 +12,41 @@ const members = [
 
 const getGroupMembersModel = jest.fn(async () => members);
 const getAllByGroupModel = jest.fn();
+const createExpenseModel = jest.fn(async (data) => ({ id: 1, ...data }));
+const deleteExpenseModel = jest.fn(async () => true);
+const getExpenseByIdModel = jest.fn();
+const getMembershipModel = jest.fn();
 
 jest.unstable_mockModule('../../database/expenses.model.js', () => ({
   default: () => ({
     getAllByGroupModel,
-    createExpenseModel: jest.fn(),
-    deleteExpenseModel: jest.fn(),
+    createExpenseModel,
+    deleteExpenseModel,
+    getExpenseByIdModel,
     getGroupMembersModel,
   }),
+}));
+
+jest.unstable_mockModule('../../database/groups.model.js', () => ({
+  default: () => ({ getMembershipModel }),
 }));
 
 const { default: ExpensesService } = await import('../expenses.service.js');
 const expensesService = ExpensesService();
 
 describe('expenses.service getBalances/settleUp', () => {
+  beforeEach(() => {
+    getMembershipModel.mockReset();
+    getMembershipModel.mockResolvedValue({ isMember: true, isOwner: false });
+  });
+
   it('splits a single expense evenly between two members and produces one settlement', async () => {
     getGroupMembersModel.mockResolvedValueOnce(members.slice(0, 2));
     getAllByGroupModel.mockResolvedValueOnce([
       { paid_by_user_id: 1, amount: '100.00' },
     ]);
 
-    const result = await expensesService.getBalances(1);
+    const result = await expensesService.getBalances(1, 1);
 
     expect(result.total).toBe(100);
     expect(result.share).toBe(50);
@@ -47,7 +61,7 @@ describe('expenses.service getBalances/settleUp', () => {
       { paid_by_user_id: 2, amount: '0.00' },
     ]);
 
-    const result = await expensesService.getBalances(1);
+    const result = await expensesService.getBalances(1, 1);
 
     // Total 90 entre 3 = 30 c/u. Ana pagó 90 (le deben 60), Beto y Caro
     // pagaron 0 (deben 30 cada uno) -> 2 pagos, no 3.
@@ -63,7 +77,7 @@ describe('expenses.service getBalances/settleUp', () => {
       { paid_by_user_id: 1, amount: '100.00' },
     ]);
 
-    const result = await expensesService.getBalances(1);
+    const result = await expensesService.getBalances(1, 1);
 
     // 100 / 3 = 33.33... -> share se redondea a 33.33, y las
     // liquidaciones deben seguir sumando (casi) el total repartido.
@@ -75,9 +89,58 @@ describe('expenses.service getBalances/settleUp', () => {
   it('produces no settlements when there are no expenses', async () => {
     getAllByGroupModel.mockResolvedValueOnce([]);
 
-    const result = await expensesService.getBalances(1);
+    const result = await expensesService.getBalances(1, 1);
 
     expect(result.total).toBe(0);
     expect(result.settlements).toEqual([]);
+  });
+});
+
+// Antes de este audit, getAllByGroup/getBalances/create/remove no
+// verificaban que quien pregunta sea parte del grupo: cualquier
+// usuario logueado podía leer/crear/borrar gastos de un grupo ajeno
+// con solo saber (o adivinar) el groupId.
+describe('expenses.service authorization', () => {
+  beforeEach(() => {
+    getMembershipModel.mockReset();
+    createExpenseModel.mockClear();
+    deleteExpenseModel.mockClear();
+  });
+
+  it('getAllByGroup hides a group the requester is not part of', async () => {
+    getMembershipModel.mockResolvedValue({ isMember: false, isOwner: false });
+    await expect(expensesService.getAllByGroup(1, 999)).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it('getBalances hides a group the requester is not part of', async () => {
+    getMembershipModel.mockResolvedValue({ isMember: false, isOwner: false });
+    await expect(expensesService.getBalances(1, 999)).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it('create rejects a requester who is not a member of the group', async () => {
+    getMembershipModel.mockResolvedValue({ isMember: false, isOwner: false });
+    await expect(expensesService.create({ groupId: 1, paidByUserId: 1, description: 'Almuerzo', amount: 10 }, 999))
+      .rejects.toMatchObject({ statusCode: 404 });
+    expect(createExpenseModel).not.toHaveBeenCalled();
+  });
+
+  it('create rejects attributing the expense to a non-member payer', async () => {
+    getMembershipModel.mockImplementation(async (groupId, userId) => ({ isMember: userId !== 5, isOwner: false }));
+    await expect(expensesService.create({ groupId: 1, paidByUserId: 5, description: 'Almuerzo', amount: 10 }, 1))
+      .rejects.toThrow('debe ser parte del grupo');
+    expect(createExpenseModel).not.toHaveBeenCalled();
+  });
+
+  it('remove rejects a requester outside the expense\'s group', async () => {
+    getExpenseByIdModel.mockResolvedValue({ id: 7, group_id: 1 });
+    getMembershipModel.mockResolvedValue({ isMember: false, isOwner: false });
+    await expect(expensesService.remove(7, 999)).rejects.toMatchObject({ statusCode: 404 });
+    expect(deleteExpenseModel).not.toHaveBeenCalled();
+  });
+
+  it('remove allows a member of the expense\'s group', async () => {
+    getExpenseByIdModel.mockResolvedValue({ id: 7, group_id: 1 });
+    getMembershipModel.mockResolvedValue({ isMember: true, isOwner: false });
+    await expect(expensesService.remove(7, 1)).resolves.toBe(true);
   });
 });

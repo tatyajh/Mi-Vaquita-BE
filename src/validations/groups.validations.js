@@ -23,6 +23,13 @@ class ProRequiredException extends Error {
   }
 }
 
+class ForbiddenException extends Error {
+  constructor(message) {
+    super(message);
+    this.statusCode = StatusCodes.FORBIDDEN;
+  }
+}
+
 const validateGroup = (groupData) => {
   const schema = Joi.object({
     ownerUserId: Joi.number().integer().positive(), 
@@ -40,4 +47,4 @@ const validateGroup = (groupData) => {
   return schema.validate(groupData);
 };
 
-export { NotFoundException, ConflictException, ProRequiredException, validateGroup };
+export { NotFoundException, ConflictException, ProRequiredException, ForbiddenException, validateGroup };

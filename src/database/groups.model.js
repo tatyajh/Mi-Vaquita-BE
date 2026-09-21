@@ -29,6 +29,22 @@ const GroupsModel = () => {
     return result.rows[0];
   };
 
+  // Base de todos los chequeos de autorización de este archivo: antes
+  // de esto, cualquier usuario logueado podía leer/editar/borrar el
+  // grupo o los gastos de CUALQUIER otro (bastaba con adivinar el id).
+  const getMembershipModel = async (groupId, userId) => {
+    const result = await pool.query(
+      `SELECT (g.owneruserid = $2) AS is_owner
+       FROM Groups g
+       WHERE g.id = $1 AND (g.owneruserid = $2 OR EXISTS (
+         SELECT 1 FROM GroupParticipants gp WHERE gp.group_id = g.id AND gp.user_id = $2
+       ))`,
+      [groupId, userId]
+    );
+    if (!result.rows[0]) return { isMember: false, isOwner: false };
+    return { isMember: true, isOwner: result.rows[0].is_owner };
+  };
+
   const createGroupsModel = async (data) => {
     const client = await pool.connect();
     try {
@@ -122,6 +138,7 @@ const GroupsModel = () => {
     getAllGroupsModel,
     getGroupsForUserModel,
     getByIdGroupsModel,
+    getMembershipModel,
     createGroupsModel,
     updateGroupsModel,
     deleteGroupsModel,

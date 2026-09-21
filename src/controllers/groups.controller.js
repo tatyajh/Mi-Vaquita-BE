@@ -1,6 +1,6 @@
 import GroupService from "../services/groups.service.js";
 import { StatusCodes } from 'http-status-codes';
-import { NotFoundException, ConflictException, ProRequiredException } from '../validations/groups.validations.js';
+import { NotFoundException, ConflictException, ProRequiredException, ForbiddenException } from '../validations/groups.validations.js';
 
 const groupService = GroupService();
 
@@ -17,7 +17,7 @@ export const getAllGroupsController = async (req, res) => {
 
 export const getByIdGroupsController = async (req, res) => {
   try {
-    const group = await groupService.getById(req.params.id);
+    const group = await groupService.getById(req.params.id, req.userId);
     res.status(StatusCodes.OK).json(group);
   } catch (error) {
     if (error instanceof NotFoundException) {
@@ -52,7 +52,7 @@ export const editByIdGroupsController = async (req, res) => {
     if (error instanceof NotFoundException) {
       return res.status(StatusCodes.NOT_FOUND).json({ message: error.message });
     }
-    if (error instanceof ProRequiredException) {
+    if (error instanceof ProRequiredException || error instanceof ForbiddenException) {
       return res.status(error.statusCode).json({ message: error.message, code: error.code });
     }
     console.error(`Failed to update group with id ${id}:`, error);
@@ -61,13 +61,16 @@ export const editByIdGroupsController = async (req, res) => {
 };
 
 export const removeByIdGroupsController = async (req, res) => {
+  const { id } = req.params;
   try {
-    const { id } = req.params;
-    await groupService.removeById(id);
+    await groupService.removeById(id, req.userId);
     res.status(StatusCodes.OK).json({ message: 'Group deleted successfully' });
   } catch (error) {
     if (error instanceof NotFoundException) {
       return res.status(StatusCodes.NOT_FOUND).json({ message: error.message });
+    }
+    if (error instanceof ForbiddenException) {
+      return res.status(error.statusCode).json({ message: error.message });
     }
     console.error(`Failed to remove group with id ${id}:`, error);
     res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: "Internal server error" });
@@ -80,7 +83,7 @@ export const addGroupParticipantsController = async (req, res) => {
     await groupService.addParticipants(groupId, participantIds, req.userId);
     res.status(StatusCodes.CREATED).json({ message: 'Participants added successfully' });
   } catch (error) {
-    if (error instanceof ConflictException || error instanceof NotFoundException) {
+    if (error instanceof ConflictException || error instanceof NotFoundException || error instanceof ForbiddenException) {
       return res.status(error.statusCode).json({ message: error.message });
     }
     console.error('Error adding participants:', error);
@@ -91,9 +94,12 @@ export const addGroupParticipantsController = async (req, res) => {
 export const getGroupParticipantsController = async (req, res) => {
   const { groupId } = req.params;
   try {
-    const participants = await groupService.getParticipants(groupId);
+    const participants = await groupService.getParticipants(groupId, req.userId);
     res.status(StatusCodes.OK).json(participants);
   } catch (error) {
+    if (error instanceof NotFoundException) {
+      return res.status(StatusCodes.NOT_FOUND).json({ message: error.message });
+    }
     console.error('Error getting participants:', error);
     res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: 'Internal server error' });
   }

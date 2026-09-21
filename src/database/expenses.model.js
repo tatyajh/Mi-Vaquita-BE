@@ -52,6 +52,14 @@ const ExpensesModel = () => {
     }
   };
 
+  // Para autorizar el borrado: hay que saber a qué grupo pertenece el
+  // gasto ANTES de borrarlo, así el service puede confirmar que quien
+  // pide borrarlo es miembro de ese grupo.
+  const getExpenseByIdModel = async (id) => {
+    const result = await pool.query('SELECT id, group_id, paid_by_user_id FROM Expenses WHERE id = $1', [id]);
+    return result.rows[0];
+  };
+
   // Miembros de un grupo: el dueño más quienes están en
   // GroupParticipants, sin duplicados. Es contra quién se reparte el
   // gasto — no solo contra los participantes agregados aparte.
@@ -77,6 +85,7 @@ const ExpensesModel = () => {
     getAllByGroupModel,
     createExpenseModel,
     deleteExpenseModel,
+    getExpenseByIdModel,
     getGroupMembersModel,
   };
 };

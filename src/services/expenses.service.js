@@ -1,19 +1,41 @@
 import ExpensesModel from '../database/expenses.model.js';
+import GroupsModel from '../database/groups.model.js';
+
+// Antes ninguna de estas funciones verificaba que quien pregunta sea
+// parte del grupo: cualquier usuario logueado podía leer los gastos y
+// saldos de CUALQUIER grupo, o registrar/borrar gastos en un grupo
+// ajeno, con solo saber (o adivinar) el groupId. "No existe" en vez de
+// "no autorizado" para no filtrar qué ids de grupo son válidos.
+const notFound = (message) => { const error = new Error(message); error.statusCode = 404; return error; };
 
 const ExpensesService = () => {
   const expensesModel = ExpensesModel();
+  const groupsModel = GroupsModel();
 
-  const getAllByGroup = async (groupId) => {
+  const assertGroupMember = async (groupId, userId) => {
+    const { isMember } = await groupsModel.getMembershipModel(groupId, userId);
+    if (!isMember) {
+      throw notFound(`Group with id ${groupId} does not exist`);
+    }
+  };
+
+  const getAllByGroup = async (groupId, requesterUserId) => {
+    await assertGroupMember(groupId, requesterUserId);
     return expensesModel.getAllByGroupModel(groupId);
   };
 
-  const create = async ({ groupId, paidByUserId, description, amount, receiptUrl, paymentMethod, category }) => {
+  const create = async ({ groupId, paidByUserId, description, amount, receiptUrl, paymentMethod, category }, requesterUserId) => {
     if (!description || !description.trim()) {
       throw new Error('La descripción es obligatoria');
     }
     const parsedAmount = Number(amount);
     if (!parsedAmount || parsedAmount <= 0) {
       throw new Error('El monto debe ser mayor a cero');
+    }
+    await assertGroupMember(groupId, requesterUserId);
+    const payer = await groupsModel.getMembershipModel(groupId, paidByUserId);
+    if (!payer.isMember) {
+      throw new Error('La persona que pagó debe ser parte del grupo');
     }
     return expensesModel.createExpenseModel({
       groupId,
@@ -26,10 +48,15 @@ const ExpensesService = () => {
     });
   };
 
-  const remove = async (id) => {
+  const remove = async (id, requesterUserId) => {
+    const expense = await expensesModel.getExpenseByIdModel(id);
+    if (!expense) {
+      throw notFound(`Expense with id ${id} does not exist`);
+    }
+    await assertGroupMember(expense.group_id, requesterUserId);
     const deleted = await expensesModel.deleteExpenseModel(id);
     if (!deleted) {
-      throw new Error(`Expense with id ${id} does not exist`);
+      throw notFound(`Expense with id ${id} does not exist`);
     }
     return deleted;
   };
@@ -39,7 +66,8 @@ const ExpensesService = () => {
   // eso arma quién le debe a quién con el menor número de pagos
   // posible (algoritmo greedy: el que más debe le paga al que más le
   // deben, y así hasta que todos quedan en cero).
-  const getBalances = async (groupId) => {
+  const getBalances = async (groupId, requesterUserId) => {
+    await assertGroupMember(groupId, requesterUserId);
     const [members, expenses] = await Promise.all([
       expensesModel.getGroupMembersModel(groupId),
       expensesModel.getAllByGroupModel(groupId),
