@@ -298,8 +298,26 @@ router.post('/activities/:id/notifications/retry',async(req,res)=>{
   const a=await getActivity(pool,req.params.id,{userId:req.userId});
   if(!a||a.effective_owner!==req.userId)return fail(res,'No autorizado',403);
   const whatsapp=await deliverAssignments(a.id,true);
-  const notifications=(await pool.query('SELECT status,COUNT(*)::int count FROM Notifications WHERE activity_id=$1 GROUP BY status',[a.id])).rows;
-  res.json({notifications,whatsapp});
+  const notifications=(await pool.query('SELECT status,channel,COUNT(*)::int count FROM Notifications WHERE activity_id=$1 GROUP BY status,channel ORDER BY status,channel',[a.id])).rows;
+  const failures=(await pool.query("SELECT last_error FROM Notifications WHERE activity_id=$1 AND status='failed'",[a.id])).rows;
+  const testSenderRestricted=failures.some(({last_error})=>/testing emails|verify a domain|only send.*your own email/i.test(last_error||''));
+  res.json({notifications,whatsapp,failedCount:failures.length,failureCode:testSenderRestricted?'resend_test_sender':failures.length?'email_provider_rejected':null});
+});
+
+router.post('/activities/:id/complete',async(req,res)=>{
+  try{
+    const result=await tx(async db=>{
+      const a=await getActivity(db,req.params.id,{userId:req.userId},true);
+      if(!a||a.effective_owner!==req.userId)throw new Error('No autorizado');
+      if(!['secret_santa','raffle'].includes(a.type))throw new Error('Esta actividad se finaliza al conciliarla');
+      if(a.status==='closed')return {status:'closed',completedAt:a.reconciled_at};
+      if(a.status!=='drawn')throw new Error('Realiza el sorteo antes de finalizar la actividad');
+      const completed=(await db.query("UPDATE Activities SET reconciled_at=NOW(),status='closed' WHERE id=$1 RETURNING reconciled_at",[a.id])).rows[0];
+      await db.query("INSERT INTO AuditLog(actor_user_id,scope_type,scope_id,action,after_data) VALUES($1,'activity',$2,'activity_completed',$3)",[req.userId,a.id,JSON.stringify({status:'closed'})]);
+      return {status:'closed',completedAt:completed.reconciled_at};
+    });
+    res.json(result);
+  }catch(error){fail(res,error.message,error.message==='No autorizado'?403:400);}
 });
 
 router.post('/activities/:id/transactions',async(req,res)=>{
