@@ -168,6 +168,31 @@ const queries = [
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
   );`,
   `CREATE UNIQUE INDEX IF NOT EXISTS subscriptions_stripe_customer_unique ON Subscriptions(stripe_customer_id);`,
+  `CREATE TABLE IF NOT EXISTS ReminderPreferences (
+    user_id INTEGER PRIMARY KEY REFERENCES Users(id) ON DELETE CASCADE,
+    in_app_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    email_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    days_before INTEGER[] NOT NULL DEFAULT ARRAY[7,1],
+    overdue_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+  );`,
+  `CREATE TABLE IF NOT EXISTS CalendarReminders (
+    id BIGSERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES Users(id) ON DELETE CASCADE,
+    event_key VARCHAR(160) NOT NULL,
+    event_type VARCHAR(30) NOT NULL,
+    event_date DATE NOT NULL,
+    timing VARCHAR(20) NOT NULL CHECK(timing IN ('7_days','1_day','overdue')),
+    title VARCHAR(180) NOT NULL,
+    link VARCHAR(240) NOT NULL,
+    amount NUMERIC(12,2),
+    email_status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK(email_status IN ('pending','sent','failed','skipped')),
+    email_attempts INTEGER NOT NULL DEFAULT 0,
+    last_error VARCHAR(500),
+    read_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE(user_id,event_key,timing)
+  );`,
 ];
 
 // Los grupos referencian usuarios por posición (1 = miguel, 2 = juan

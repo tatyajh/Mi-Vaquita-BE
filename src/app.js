@@ -15,6 +15,7 @@ import natilleraRoutes from './routes/natilleras.router.js';
 import activityRoutes from './routes/activities.router.js';
 import communityRoutes from './routes/community.router.js';
 import billingRoutes from './routes/billing.router.js';
+import calendarRoutes from './routes/calendar.router.js';
 import { webhookController } from './controllers/billing.controller.js';
 
 const app = express();
@@ -46,6 +47,7 @@ app.use('/api/natilleras', natilleraRoutes);
 app.use('/api/activities', activityRoutes);
 app.use('/api/community', communityRoutes);
 app.use('/api/billing', billingRoutes);
+app.use('/api/calendar', calendarRoutes);
 
 // En Vercel el runtime de Node maneja el request/response
 // directamente sobre `app` (export default) — llamar a listen() ahí

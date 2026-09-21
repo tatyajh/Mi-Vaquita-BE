@@ -70,4 +70,10 @@ export const sendSecretSantaEmail = (to, { activityName, recipientName, eventOn,
   html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto"><h2 style="color:#65a930">Tu amigo secreto</h2><p>Te tocó <strong>${escapeHtml(recipientName)}</strong>.</p><p>Fecha: ${escapeHtml(eventOn)}${budget != null ? ` · Presupuesto orientativo: $${escapeHtml(budget)}` : ''}</p><p><a href="${escapeHtml(privateUrl)}">Ver mi asignación privada</a></p></div>`,
 });
 
-export default { sendPasswordResetEmail, sendInvitationEmail, sendSecretSantaEmail, sendTransactionalEmail };
+export const sendReminderEmail = (to, reminder) => sendTransactionalEmail({
+  to,
+  subject: `${reminder.timing==='overdue'?'Compromiso vencido':'Próximo compromiso'}: ${reminder.title}`,
+  html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto"><h2 style="color:#65a930">${reminder.timing==='overdue'?'Tienes un compromiso vencido':'Recuerda esta fecha'}</h2><p><strong>${escapeHtml(reminder.title)}</strong></p><p>Fecha: ${escapeHtml(reminder.event_date)}</p><p><a href="${escapeHtml(`${String(process.env.FRONTEND_URL||'').replace(/\/$/,'')}${reminder.link}`)}" style="background:#ed1651;color:white;padding:12px 20px;border-radius:999px;text-decoration:none">Ver en Mi Vaquita</a></p></div>`,
+});
+
+export default { sendPasswordResetEmail, sendInvitationEmail, sendSecretSantaEmail, sendReminderEmail, sendTransactionalEmail };
