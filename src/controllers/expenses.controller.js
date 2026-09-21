@@ -1,4 +1,5 @@
 import ExpensesService from '../services/expenses.service.js';
+import storageService from '../services/storage.service.js';
 import { StatusCodes } from 'http-status-codes';
 
 const expensesService = ExpensesService();
@@ -30,27 +31,26 @@ export const createExpenseController = async (req, res) => {
   }
 };
 
-// Sube el archivo del recibo a un storage externo (Supabase Storage).
-// No hay integración de Supabase Storage en este backend (habla con
-// Postgres directo vía `pg`, no con el cliente supabase-js) ni
-// credenciales de service role disponibles en este entorno, así que
-// devolvemos honestamente "no configurado" en vez de simular un
-// upload exitoso. El gasto se puede seguir creando sin receiptUrl.
+// Sube el archivo del recibo a Supabase Storage. Si no hay
+// credenciales configuradas, responde 501 honesto en vez de simular
+// un upload exitoso — el gasto se puede seguir creando sin receiptUrl.
 export const uploadReceiptController = async (req, res) => {
-  const isConfigured = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
-  if (!isConfigured) {
-    return res.status(StatusCodes.NOT_IMPLEMENTED).json({
-      message: 'La subida de recibos no está configurada en el servidor (falta integración de storage / credenciales). El gasto se puede guardar sin foto.',
-      configured: false,
-    });
+  if (!req.file) {
+    return res.status(StatusCodes.BAD_REQUEST).json({ message: 'No se recibió ningún archivo' });
   }
-  // Punto de extensión: si en el futuro se configuran
-  // SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY, acá se subiría req.file.buffer
-  // al bucket de Supabase Storage y se devolvería la URL pública.
-  return res.status(StatusCodes.NOT_IMPLEMENTED).json({
-    message: 'Integración de storage detectada pero no implementada todavía.',
-    configured: true,
-  });
+  try {
+    const { url } = await storageService.uploadReceipt(req.file, req.userId);
+    res.status(StatusCodes.OK).json({ url });
+  } catch (error) {
+    if (error.code === 'STORAGE_NOT_CONFIGURED') {
+      return res.status(StatusCodes.NOT_IMPLEMENTED).json({ message: error.message, configured: false });
+    }
+    if (error.code === 'INVALID_FILE_TYPE' || error.code === 'FILE_TOO_LARGE') {
+      return res.status(StatusCodes.BAD_REQUEST).json({ message: error.message });
+    }
+    console.error('Failed to upload receipt:', error);
+    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: 'No se pudo subir el recibo. Intenta de nuevo.' });
+  }
 };
 
 export const removeExpenseController = async (req, res) => {
