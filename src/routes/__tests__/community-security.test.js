@@ -34,6 +34,7 @@ it('conserva un enlace manual de WhatsApp utilizable después del sorteo',()=>{
   if(oldSecret)process.env.JWT_SECRET=oldSecret;else delete process.env.JWT_SECRET;
   expect(result.notificationId).toBe(7);
   expect(result.whatsappUrl).toContain('https://wa.me/573001234567?text=');
-  expect(decodeURIComponent(result.whatsappUrl)).toContain('te tocó Ana');
+  expect(decodeURIComponent(result.whatsappUrl)).not.toContain('Ana');
+  expect(decodeURIComponent(result.whatsappUrl)).toContain('El resultado no aparece en este mensaje');
   expect(decodeURIComponent(result.whatsappUrl)).toContain('token=privado');
 });

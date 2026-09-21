@@ -15,7 +15,7 @@ const fail = (res, message, status = 400) => res.status(status).json({ message }
 const hashToken = value => crypto.createHash('sha256').update(value).digest('hex');
 const normalizedEmail = value => value ? String(value).trim().toLowerCase() : null;
 const frontendUrl = () => String(process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
-export const buildPreparedWhatsapp = row => { const privateUrl=decryptDeliveryUrl(row.delivery_url); return {notificationId:row.id,participantId:row.participant_id,whatsappUrl:`https://wa.me/${String(row.phone||'').replace(/\D/g,'')}?text=${encodeURIComponent(`En ${row.name}, te tocó ${row.recipient_name}. Mira tu asignación privada: ${privateUrl}`)}`}; };
+export const buildPreparedWhatsapp = row => { const privateUrl=decryptDeliveryUrl(row.delivery_url); return {notificationId:row.id,participantId:row.participant_id,whatsappUrl:`https://wa.me/${String(row.phone||'').replace(/\D/g,'')}?text=${encodeURIComponent(`Tu asignación privada de ${row.name} ya está lista. Ábrela en Mi Vaquita: ${privateUrl}\n\nEl resultado no aparece en este mensaje. No compartas el enlace ni tu PIN.`)}`}; };
 const tx = async fn => {
   const db = await pool.connect();
   try { await db.query('BEGIN'); const result = await fn(db); await db.query('COMMIT'); return result; }
@@ -70,7 +70,14 @@ router.post('/invitations/claim', rateLimit({ max: 8 }), async (req, res) => {
 router.post('/invitations/access', rateLimit({ max: 8 }), async (req, res) => {
   const { token, pin } = req.body;
   const row = (await pool.query('SELECT * FROM Invitations WHERE token_hash=$1 AND revoked_at IS NULL AND claimed_at IS NOT NULL AND expires_at>NOW()', [hashToken(token || '')])).rows[0];
-  if (!row || !row.pin_hash || !(await bcrypt.compare(String(pin || ''), row.pin_hash))) return fail(res, 'PIN o invitación inválidos', 401);
+  if(!row)return fail(res,'PIN o invitación inválidos',401);
+  if(row.locked_until&&new Date(row.locked_until)>new Date())return fail(res,'Demasiados intentos. Espera 15 minutos antes de volver a intentar.',429);
+  if(!row.pin_hash||!(await bcrypt.compare(String(pin||''),row.pin_hash))){
+    const attempts=Number(row.failed_pin_attempts||0)+1;
+    await pool.query(`UPDATE Invitations SET failed_pin_attempts=$1,locked_until=CASE WHEN $1>=5 THEN NOW()+INTERVAL '15 minutes' ELSE NULL END WHERE id=$2`,[attempts>=5?0:attempts,row.id]);
+    return fail(res,attempts>=5?'Demasiados intentos. El acceso quedó bloqueado durante 15 minutos.':'PIN o invitación inválidos',attempts>=5?429:401);
+  }
+  await pool.query('UPDATE Invitations SET failed_pin_attempts=0,locked_until=NULL WHERE id=$1',[row.id]);
   const accessToken = jwt.sign({ guestId: row.guest_id, scope: { type: row.scope_type, id: row.scope_id } }, process.env.JWT_SECRET, { expiresIn: '12h' });
   res.json({ accessToken, scope: { type: row.scope_type, id: row.scope_id } });
 });
@@ -109,6 +116,7 @@ router.post('/guests', async (req, res) => {
 router.post('/natilleras/:id/invitations',async(req,res)=>{
   const participant=(await pool.query(`SELECT p.*,g.name,g.email,g.phone,n.name natillera_name,n.owner_id FROM NatilleraParticipants p JOIN Guests g ON g.id=p.guest_id JOIN Natilleras n ON n.id=p.natillera_id WHERE p.id=$1 AND n.id=$2`,[req.body.participantId,req.params.id])).rows[0];
   if(!participant||participant.owner_id!==req.userId)return fail(res,'No autorizado',403);
+  await pool.query("UPDATE Invitations SET revoked_at=NOW() WHERE scope_type='natillera' AND scope_id=$1 AND guest_id=$2 AND revoked_at IS NULL",[req.params.id,participant.guest_id]);
   const raw=crypto.randomBytes(32).toString('hex');
   const invitation=(await pool.query("INSERT INTO Invitations(scope_type,scope_id,guest_id,token_hash,expires_at,created_by) VALUES('natillera',$1,$2,$3,NOW()+INTERVAL '7 days',$4) RETURNING id,expires_at",[req.params.id,participant.guest_id,hashToken(raw),req.userId])).rows[0];
   const claimUrl=`${frontendUrl()}/invitacion?token=${raw}`;let emailStatus='not_applicable';
@@ -191,10 +199,10 @@ router.get('/activities/:id', async (req, res) => {
   const notifications=(await pool.query('SELECT status,channel,COUNT(*)::int count FROM Notifications WHERE activity_id=$1 GROUP BY status,channel ORDER BY status,channel',[a.id])).rows;
   let preparedWhatsapp=[];
   if(a.effective_owner===req.userId){
-    const prepared=(await pool.query(`SELECT n.id,p.id participant_id,g.phone,a.name,n.delivery_url,COALESCE(ru.name,rg.name) recipient_name
-      FROM Notifications n JOIN Activities a ON a.id=n.activity_id JOIN ActivityParticipants p ON p.id=n.participant_id JOIN Guests g ON g.id=p.guest_id
-      LEFT JOIN ActivityParticipants r ON r.id=p.recipient_participant_id LEFT JOIN Users ru ON ru.id=r.user_id LEFT JOIN Guests rg ON rg.id=r.guest_id
-      WHERE n.activity_id=$1 AND n.channel='whatsapp' AND n.status='prepared'`,[a.id])).rows;
+    const prepared=(await pool.query(`SELECT n.id,p.id participant_id,COALESCE(u.phone,g.phone) phone,a.name,n.delivery_url
+      FROM Notifications n JOIN Activities a ON a.id=n.activity_id JOIN ActivityParticipants p ON p.id=n.participant_id
+      LEFT JOIN Users u ON u.id=p.user_id LEFT JOIN Guests g ON g.id=p.guest_id
+      WHERE n.activity_id=$1 AND COALESCE(u.phone,g.phone) IS NOT NULL AND ((n.channel='whatsapp' AND n.status='prepared') OR (n.channel='email' AND n.status='failed'))`,[a.id])).rows;
     preparedWhatsapp=prepared.map(buildPreparedWhatsapp);
   }
   const winner=(await pool.query(`SELECT w.participant_id,w.number,COALESCE(u.name,g.name) name FROM ActivityParticipantWinners w JOIN ActivityParticipants p ON p.id=w.participant_id LEFT JOIN Users u ON u.id=p.user_id LEFT JOIN Guests g ON g.id=p.guest_id WHERE w.activity_id=$1`,[a.id])).rows[0]||null;
@@ -209,11 +217,14 @@ router.post('/activities/:id/invitations', async (req,res) => {
       if(!a||a.effective_owner!==req.userId)throw new Error('No autorizado');
       const p=(await db.query(`SELECT p.*,g.name,g.email,g.phone FROM ActivityParticipants p JOIN Guests g ON g.id=p.guest_id WHERE p.id=$1 AND p.activity_id=$2`,[participantId,a.id])).rows[0];
       if(!p)throw new Error('El participante no es un invitado');
+      await db.query("UPDATE Invitations SET revoked_at=NOW() WHERE scope_type='activity' AND scope_id=$1 AND guest_id=$2 AND revoked_at IS NULL",[a.id,p.guest_id]);
       const raw=crypto.randomBytes(32).toString('hex');
       const invitation=(await db.query("INSERT INTO Invitations(scope_type,scope_id,guest_id,token_hash,expires_at,created_by) VALUES('activity',$1,$2,$3,NOW()+INTERVAL '7 days',$4) RETURNING id,expires_at",[a.id,p.guest_id,hashToken(raw),req.userId])).rows[0];
-      return { invitation, raw, participant:p, activity:a };
+      const claimUrl=`${frontendUrl()}/invitacion?token=${raw}&next=${encodeURIComponent(`/actividades/${a.id}/privado`)}`;
+      await db.query('UPDATE Notifications SET delivery_url=$1 WHERE activity_id=$2 AND participant_id=$3',[encryptDeliveryUrl(claimUrl),a.id,p.id]);
+      return { invitation, claimUrl, participant:p, activity:a };
     });
-    const claimUrl=`${frontendUrl()}/invitacion?token=${result.raw}`;
+    const claimUrl=result.claimUrl;
     let emailStatus='not_applicable';
     if(result.participant.email){try{await sendInvitationEmail(result.participant.email,{activityName:result.activity.name,claimUrl});emailStatus='sent';}catch(error){emailStatus='failed';console.error('No se pudo enviar invitación:',error.message);}}
     const whatsappUrl=result.participant.phone?`https://wa.me/${result.participant.phone.replace(/\D/g,'')}?text=${encodeURIComponent(`Te invitaron a ${result.activity.name} en Mi Vaquita. Abre ${claimUrl}`)}`:null;
@@ -245,14 +256,12 @@ async function deliverAssignments(activityId, onlyFailed=false){
   for(const row of rows){
     const decryptedUrl=decryptDeliveryUrl(row.delivery_url);
     if(row.channel==='whatsapp'){
-      const privateUrl=decryptedUrl||`${frontendUrl()}/actividades/${activityId}/privado`;
-      const text=`En ${row.name}, te tocó ${row.recipient_name}. Mira tu asignación privada: ${privateUrl}`;
-      output.push({participantId:row.participant_id,whatsappUrl:`https://wa.me/${String(row.phone||'').replace(/\D/g,'')}?text=${encodeURIComponent(text)}`});
+      output.push(buildPreparedWhatsapp({id:row.notification_id,participant_id:row.participant_id,phone:row.phone,name:row.name,delivery_url:row.delivery_url}));
       await pool.query("UPDATE Notifications SET status='prepared',attempts=attempts+1,last_error=NULL WHERE id=$1",[row.notification_id]);
     }else try{
       await sendSecretSantaEmail(row.email,{activityName:row.name,recipientName:row.recipient_name,eventOn:row.event_on,budget:row.budget,privateUrl:decryptedUrl||`${frontendUrl()}/actividades/${activityId}/privado`});
       await pool.query("UPDATE Notifications SET status='sent',attempts=attempts+1,sent_at=NOW(),last_error=NULL WHERE id=$1",[row.notification_id]);
-    }catch(error){await pool.query("UPDATE Notifications SET status='failed',attempts=attempts+1,last_error=$2 WHERE id=$1",[row.notification_id,error.message.slice(0,500)]);}
+    }catch(error){await pool.query("UPDATE Notifications SET status='failed',attempts=attempts+1,last_error=$2 WHERE id=$1",[row.notification_id,error.message.slice(0,500)]);if(row.phone)output.push(buildPreparedWhatsapp({id:row.notification_id,participant_id:row.participant_id,phone:row.phone,name:row.name,delivery_url:row.delivery_url}));}
   }
   return output;
 }
@@ -273,9 +282,9 @@ router.post('/activities/:id/draw',async(req,res)=>{
       const assignment=matching(participants.map(p=>p.id),exclusions);if(!assignment)throw new Error('Las exclusiones impiden un sorteo válido');
       for(const [from,to] of assignment)await db.query('UPDATE ActivityParticipants SET recipient_participant_id=$1 WHERE id=$2',[to,from]);
       for(const p of participants){
-        const contact=(await db.query('SELECT u.email,g.email AS guest_email,g.phone FROM ActivityParticipants p LEFT JOIN Users u ON u.id=p.user_id LEFT JOIN Guests g ON g.id=p.guest_id WHERE p.id=$1',[p.id])).rows[0];
+        const contact=(await db.query('SELECT u.email,u.phone AS user_phone,g.email AS guest_email,g.phone FROM ActivityParticipants p LEFT JOIN Users u ON u.id=p.user_id LEFT JOIN Guests g ON g.id=p.guest_id WHERE p.id=$1',[p.id])).rows[0];
         const channel=(contact.email||contact.guest_email)?'email':'whatsapp';let deliveryUrl=`${frontendUrl()}/actividades/${a.id}/privado`;
-        if(p.guest_id){const raw=crypto.randomBytes(32).toString('hex');await db.query("INSERT INTO Invitations(scope_type,scope_id,guest_id,token_hash,expires_at,created_by) VALUES('activity',$1,$2,$3,NOW()+INTERVAL '7 days',$4)",[a.id,p.guest_id,hashToken(raw),req.userId]);deliveryUrl=`${frontendUrl()}/invitacion?token=${raw}&next=${encodeURIComponent(`/actividades/${a.id}/privado`)}`;}
+        if(p.guest_id){const raw=crypto.randomBytes(32).toString('hex');await db.query("UPDATE Invitations SET revoked_at=NOW() WHERE scope_type='activity' AND scope_id=$1 AND guest_id=$2 AND revoked_at IS NULL",[a.id,p.guest_id]);await db.query("INSERT INTO Invitations(scope_type,scope_id,guest_id,token_hash,expires_at,created_by) VALUES('activity',$1,$2,$3,NOW()+INTERVAL '7 days',$4)",[a.id,p.guest_id,hashToken(raw),req.userId]);deliveryUrl=`${frontendUrl()}/invitacion?token=${raw}&next=${encodeURIComponent(`/actividades/${a.id}/privado`)}`;}
         await db.query("INSERT INTO Notifications(activity_id,participant_id,kind,channel,idempotency_key,delivery_url) VALUES($1,$2,'secret_santa_assignment',$3,$4,$5)",[a.id,p.id,channel,`secret-santa:${a.id}:${p.id}`,encryptDeliveryUrl(deliveryUrl)]);
       }
       await db.query("UPDATE Activities SET status='drawn' WHERE id=$1",[a.id]);
@@ -302,6 +311,14 @@ router.post('/activities/:id/notifications/retry',async(req,res)=>{
   const failures=(await pool.query("SELECT last_error FROM Notifications WHERE activity_id=$1 AND status='failed'",[a.id])).rows;
   const testSenderRestricted=failures.some(({last_error})=>/testing emails|verify a domain|only send.*your own email/i.test(last_error||''));
   res.json({notifications,whatsapp,failedCount:failures.length,failureCode:testSenderRestricted?'resend_test_sender':failures.length?'email_provider_rejected':null});
+});
+
+router.post('/activities/:id/notifications/:notificationId/manual-sent',async(req,res)=>{
+  const a=await getActivity(pool,req.params.id,{userId:req.userId});
+  if(!a||a.effective_owner!==req.userId)return fail(res,'No autorizado',403);
+  const updated=(await pool.query("UPDATE Notifications SET status='manual_sent',sent_at=NOW(),last_error=NULL WHERE id=$1 AND activity_id=$2 AND status IN ('prepared','failed') RETURNING id",[req.params.notificationId,a.id])).rows[0];
+  if(!updated)return fail(res,'Aviso no encontrado o ya confirmado',404);
+  res.json({ok:true});
 });
 
 router.post('/activities/:id/complete',async(req,res)=>{
