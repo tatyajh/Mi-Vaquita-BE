@@ -99,6 +99,7 @@ const queries = [
   // compartieron un grupo con esta cuenta.
   `ALTER TABLE Users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;`,
   `ALTER TABLE Users ALTER COLUMN email TYPE VARCHAR(254);`,
+  `ALTER TABLE Users ADD COLUMN IF NOT EXISTS phone VARCHAR(30);`,
   `CREATE TABLE IF NOT EXISTS Natilleras (id SERIAL PRIMARY KEY, owner_id INTEGER NOT NULL REFERENCES Users(id), name VARCHAR(100) NOT NULL, starts_on DATE NOT NULL, ends_on DATE NOT NULL, frequency VARCHAR(20) NOT NULL CHECK (frequency IN ('weekly','biweekly','monthly')), contribution NUMERIC(12,2) NOT NULL CHECK (contribution > 0), status VARCHAR(20) NOT NULL DEFAULT 'active', closed_at TIMESTAMP, created_at TIMESTAMP NOT NULL DEFAULT NOW(), CHECK (ends_on >= starts_on));`,
   `CREATE TABLE IF NOT EXISTS NatilleraMembers (natillera_id INTEGER NOT NULL REFERENCES Natilleras(id), user_id INTEGER NOT NULL REFERENCES Users(id), joined_at TIMESTAMP NOT NULL DEFAULT NOW(), PRIMARY KEY (natillera_id,user_id));`,
   `CREATE TABLE IF NOT EXISTS NatilleraContributions (id SERIAL PRIMARY KEY, natillera_id INTEGER NOT NULL REFERENCES Natilleras(id), user_id INTEGER NOT NULL REFERENCES Users(id), due_on DATE NOT NULL, amount NUMERIC(12,2) NOT NULL CHECK (amount > 0), recorded_by INTEGER NOT NULL REFERENCES Users(id), created_at TIMESTAMP NOT NULL DEFAULT NOW(), corrected_at TIMESTAMP);`,
@@ -154,6 +155,19 @@ const queries = [
   `CREATE TABLE IF NOT EXISTS InventoryMovements (id SERIAL PRIMARY KEY, product_id INTEGER NOT NULL REFERENCES InventoryProducts(id) ON DELETE CASCADE, kind VARCHAR(20) NOT NULL CHECK(kind IN ('initial','entry','sale','loss','adjustment')), quantity NUMERIC(12,3) NOT NULL CHECK(quantity <> 0), unit_price NUMERIC(12,2), note VARCHAR(240), recorded_by INTEGER NOT NULL REFERENCES Users(id), created_at TIMESTAMP NOT NULL DEFAULT NOW());`,
   `CREATE TABLE IF NOT EXISTS NatilleraLedger (id SERIAL PRIMARY KEY, natillera_id INTEGER NOT NULL REFERENCES Natilleras(id) ON DELETE CASCADE, activity_id INTEGER REFERENCES Activities(id), kind VARCHAR(30) NOT NULL CHECK(kind IN ('activity_profit','general_expense','late_fee','adjustment')), amount NUMERIC(12,2) NOT NULL CHECK(amount <> 0), description VARCHAR(240) NOT NULL, recorded_by INTEGER NOT NULL REFERENCES Users(id), created_at TIMESTAMP NOT NULL DEFAULT NOW());`,
   `CREATE TABLE IF NOT EXISTS AuditLog (id BIGSERIAL PRIMARY KEY, actor_user_id INTEGER REFERENCES Users(id), actor_guest_id INTEGER REFERENCES Guests(id), scope_type VARCHAR(30) NOT NULL, scope_id INTEGER NOT NULL, action VARCHAR(60) NOT NULL, before_data JSONB, after_data JSONB, created_at TIMESTAMP NOT NULL DEFAULT NOW());`,
+  // Suscripción Pro (Stripe Checkout). Una fila por usuario; se
+  // actualiza vía webhook de Stripe, nunca directamente desde el
+  // frontend. status refleja el estado que reporta Stripe
+  // (active/trialing cuentan como Pro vigente; el resto no).
+  `CREATE TABLE IF NOT EXISTS Subscriptions (
+    user_id INTEGER PRIMARY KEY REFERENCES Users(id),
+    stripe_customer_id VARCHAR(64) NOT NULL,
+    stripe_subscription_id VARCHAR(64),
+    status VARCHAR(20) NOT NULL DEFAULT 'incomplete',
+    current_period_end TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+  );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS subscriptions_stripe_customer_unique ON Subscriptions(stripe_customer_id);`,
 ];
 
 // Los grupos referencian usuarios por posición (1 = miguel, 2 = juan

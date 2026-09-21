@@ -183,7 +183,7 @@ router.get('/activities', async (req,res)=>{
 router.get('/activities/:id', async (req, res) => {
   const a = await getActivity(pool,req.params.id,{userId:req.userId});
   if (!a) return fail(res,'Actividad no encontrada',404);
-  const participants=(await pool.query(`SELECT p.id,p.role,p.number,p.user_id,p.guest_id,COALESCE(u.name,g.name) AS name,u.email AS user_email,g.email AS guest_email,g.phone
+  const participants=(await pool.query(`SELECT p.id,p.role,p.number,p.user_id,p.guest_id,COALESCE(u.name,g.name) AS name,u.email AS user_email,g.email AS guest_email,COALESCE(u.phone,g.phone) AS phone
     FROM ActivityParticipants p LEFT JOIN Users u ON u.id=p.user_id LEFT JOIN Guests g ON g.id=p.guest_id WHERE p.activity_id=$1 ORDER BY name`,[a.id])).rows;
   const totals=(await pool.query(`SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount ELSE 0 END),0) income,COALESCE(SUM(CASE WHEN kind IN ('cost','expense') THEN amount ELSE 0 END),0) costs,COALESCE(SUM(CASE WHEN kind='adjustment' THEN amount ELSE 0 END),0) adjustments FROM FundraisingTransactions WHERE activity_id=$1 AND reversed_transaction_id IS NULL`,[a.id])).rows[0];
   const transactions=(await pool.query('SELECT * FROM FundraisingTransactions WHERE activity_id=$1 ORDER BY occurred_at DESC,id DESC',[a.id])).rows;
@@ -236,7 +236,7 @@ router.put('/activities/:id/exclusions', async(req,res)=>{
 });
 
 async function deliverAssignments(activityId, onlyFailed=false){
-  const rows=(await pool.query(`SELECT n.id notification_id,n.channel,n.delivery_url,p.id participant_id,COALESCE(u.email,g.email) email,g.phone,a.name,a.event_on,a.budget,COALESCE(ru.name,rg.name) recipient_name
+  const rows=(await pool.query(`SELECT n.id notification_id,n.channel,n.delivery_url,p.id participant_id,COALESCE(u.email,g.email) email,COALESCE(u.phone,g.phone) phone,a.name,a.event_on,a.budget,COALESCE(ru.name,rg.name) recipient_name
     FROM Notifications n JOIN Activities a ON a.id=n.activity_id JOIN ActivityParticipants p ON p.id=n.participant_id
     LEFT JOIN Users u ON u.id=p.user_id LEFT JOIN Guests g ON g.id=p.guest_id
     LEFT JOIN ActivityParticipants r ON r.id=p.recipient_participant_id LEFT JOIN Users ru ON ru.id=r.user_id LEFT JOIN Guests rg ON rg.id=r.guest_id

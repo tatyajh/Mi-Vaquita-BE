@@ -12,6 +12,7 @@ const toSafeUser = (user) => ({
   id: user.id,
   name: user.name,
   email: user.email,
+  phone: user.phone,
   createdat: user.createdat,
 });
 
@@ -29,9 +30,9 @@ export const getByIdUsersController = async (req, res) => {
 };
 
 export const createUserController = async (req, res) => {
-  const { name, email, password } = req.body;
+  const { name, email, phone, password } = req.body;
   try {
-    const newUser = await userService.create({ name, email, password });
+    const newUser = await userService.create({ name, email, phone, password });
     res.status(StatusCodes.CREATED).json(toSafeUser(newUser));
   } catch (error) {
     if (error instanceof ConflictException) {

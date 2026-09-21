@@ -21,6 +21,9 @@ const validateUser = (user) => {
   const schema = Joi.object({
     name: Joi.string().min(3).max(100).required(),
     email: Joi.string().email().required(),
+    phone: Joi.string().pattern(/^\+?[1-9]\d{7,14}$/).required().messages({
+      'string.pattern.base': 'El WhatsApp debe incluir indicativo de país, por ejemplo +573001234567',
+    }),
     password: Joi.string().pattern(PASSWORD_PATTERN).required(),
   });
 

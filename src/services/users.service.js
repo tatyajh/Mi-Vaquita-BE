@@ -18,7 +18,11 @@ const UserService = () => {
   };
 
   const create = async (newUser) => {
-    newUser = { ...newUser, email: String(newUser.email || '').trim().toLowerCase() };
+    newUser = {
+      ...newUser,
+      email: String(newUser.email || '').trim().toLowerCase(),
+      phone: String(newUser.phone || '').replace(/[\s()-]/g, ''),
+    };
     const { error } = validateUser(newUser);
     if (error) {
       throw new Error(error.details[0].message);

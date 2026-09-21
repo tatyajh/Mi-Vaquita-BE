@@ -42,8 +42,8 @@ const UsersModel = () => {
 
   const createUsersModel = async (data) => {
     const result = await pool.query(
-      'INSERT INTO users (name, email, password, createdAt) VALUES ($1, $2, $3, NOW()) RETURNING *',
-      [data.name, String(data.email).trim().toLowerCase(), data.password]
+      'INSERT INTO users (name, email, phone, password, createdAt) VALUES ($1, $2, $3, $4, NOW()) RETURNING *',
+      [data.name, String(data.email).trim().toLowerCase(), data.phone, data.password]
     );
     return result.rows[0];
   };
