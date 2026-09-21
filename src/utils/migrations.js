@@ -88,6 +88,7 @@ const queries = [
   // Tipo de paseo del grupo (playa, montaña, ciudad...), usado para
   // filtrar los consejos de ahorro contextuales.
   `ALTER TABLE Groups ADD COLUMN IF NOT EXISTS trip_type VARCHAR(30);`,
+  `ALTER TABLE Groups ADD COLUMN IF NOT EXISTS photo_data TEXT;`,
   // Recuperar contraseña por correo: token de un solo uso + su
   // expiración. Se guarda hasheado (igual que la contraseña) para que
   // una fuga de la base de datos no permita resetear cuentas ajenas.

@@ -82,7 +82,7 @@ router.get('/', async (req, res) => {
 });
 router.post('/', async (req, res) => {
   const { name, purpose=null, startsOn, endsOn, frequency, contribution, participantIds = [], guestIds = [], profitDistribution='proportional', lateFee=0 } = req.body;
-  if (!name?.trim() || !validDate(startsOn) || !validDate(endsOn) || endsOn < startsOn || !['weekly','biweekly','monthly'].includes(frequency) || !Number.isFinite(Number(contribution)) || Number(contribution) <= 0 || !Array.isArray(participantIds) || !Array.isArray(guestIds) || !['proportional','equal'].includes(profitDistribution) || Number(lateFee)<0) return bad(res, 'Revisa nombre, fechas, frecuencia, aporte y participantes');
+  if (!name?.trim() || !validDate(startsOn) || !validDate(endsOn) || endsOn < startsOn || !['weekly','biweekly','monthly'].includes(frequency) || !Number.isFinite(Number(contribution)) || Number(contribution) <= 0 || !Array.isArray(participantIds) || !Array.isArray(guestIds) || guestIds.length || !['proportional','equal'].includes(profitDistribution) || Number(lateFee)<0) return bad(res, 'La natillera requiere participantes registrados y datos válidos');
   const ids = [...new Set([req.userId, ...participantIds.map(Number)])];
   if (ids.some(id => !Number.isInteger(id) || id < 1)) return bad(res, 'Participantes inválidos');
   try {
@@ -94,11 +94,9 @@ router.post('/', async (req, res) => {
         const friends=await client.query('SELECT DISTINCT friend_user_id FROM Friends WHERE user_id=$1 AND friend_user_id=ANY($2::int[])',[req.userId,invited]);
         if(friends.rowCount!==invited.length)throw new Error('Solo puedes invitar a tus amigos registrados');
       }
-      if(guestIds.length){const guests=await client.query('SELECT id FROM Guests WHERE id=ANY($1::int[]) AND created_by=$2',[guestIds.map(Number),req.userId]);if(guests.rowCount!==new Set(guestIds.map(Number)).size)throw new Error('Algún invitado no existe');}
       const { rows } = await client.query('INSERT INTO Natilleras(owner_id,name,purpose,starts_on,ends_on,frequency,contribution,profit_distribution,late_fee,rules_locked_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) RETURNING *', [req.userId,name.trim(),purpose,startsOn,endsOn,frequency,money(contribution),profitDistribution,money(lateFee)]);
       for (const id of ids) await client.query('INSERT INTO NatilleraMembers(natillera_id,user_id) VALUES($1,$2)', [rows[0].id,id]);
       for (const id of ids) await client.query('INSERT INTO NatilleraParticipants(natillera_id,user_id,role) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [rows[0].id,id,id===req.userId?'admin':'member']);
-      for (const guestId of new Set(guestIds.map(Number))) await client.query('INSERT INTO NatilleraParticipants(natillera_id,guest_id) VALUES($1,$2)',[rows[0].id,guestId]);
       for (const dueOn of dueDates({...rows[0],starts_on:startsOn,ends_on:endsOn,frequency})) await client.query("INSERT INTO NatilleraQuotas(natillera_id,kind,name,due_on,amount,audience,created_by) VALUES($1,'ordinary','Cuota ordinaria',$2,$3,'guests',$4)",[rows[0].id,dueOn,money(contribution),req.userId]);
       return rows[0];
     });

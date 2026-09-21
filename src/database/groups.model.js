@@ -33,8 +33,8 @@ const GroupsModel = () => {
     const client = await pool.connect();
     try {
       const result = await client.query(
-        "INSERT INTO Groups (owneruserid, name, color, trip_type, CREATEDAT) VALUES ($1, $2, $3, $4, NOW()) RETURNING *",
-        [data.ownerUserId, data.name, data.color, data.tripType || null]
+        "INSERT INTO Groups (owneruserid, name, color, trip_type, photo_data, CREATEDAT) VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *",
+        [data.ownerUserId, data.name, data.color, data.tripType || null, data.photoData || null]
       );
       const group = result.rows[0];
       // El dueño también es un participante del grupo desde el
@@ -52,8 +52,8 @@ const GroupsModel = () => {
 
   const updateGroupsModel = async (id, data) => {
     const result = await pool.query(
-      "UPDATE Groups set name = $1, color = $2, trip_type = $3 WHERE id = $4 RETURNING *",
-      [data.name, data.color, data.tripType || null, id]
+      "UPDATE Groups set name = $1, color = $2, trip_type = $3, photo_data = $4 WHERE id = $5 RETURNING *",
+      [data.name, data.color, data.tripType || null, data.photoData || null, id]
     );
     return result.rows[0];
   };

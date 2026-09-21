@@ -147,7 +147,7 @@ router.post('/natilleras/:id/ledger',async(req,res)=>{
 });
 
 router.post('/activities', async (req, res) => {
-  const { type, name, eventOn, budget = null, description = null, natilleraId = null, participants = [] } = req.body;
+  const { type, name, eventOn, budget = null, description = null, natilleraId = null, participants = [], leaderUserId = null } = req.body;
   const validTypes = ['secret_santa','raffle','sale','bazaar','bingo','game','food','other'];
   if (!validTypes.includes(type) || !String(name || '').trim() || !/^\d{4}-\d{2}-\d{2}$/.test(eventOn || '') || !Array.isArray(participants)) return fail(res, 'Datos de actividad inválidos');
   try {
@@ -157,13 +157,16 @@ router.post('/activities', async (req, res) => {
         if (!access.rowCount) throw new Error('No puedes asociar esta natillera');
       }
       const row = (await db.query('INSERT INTO Activities(group_id,type,name,event_on,budget,status,created_by,owner_id,natillera_id,description) VALUES(NULL,$1,$2,$3,$4,\'draft\',$5,$5,$6,$7) RETURNING *',[type,name.trim(),eventOn,budget,req.userId,natilleraId,description])).rows[0];
-      const refs = [{ userId:req.userId, role:'admin' }, ...participants];
+      let natilleraParticipants=[];
+      if(natilleraId)natilleraParticipants=(await db.query('SELECT user_id AS "userId" FROM NatilleraParticipants WHERE natillera_id=$1 AND user_id IS NOT NULL',[natilleraId])).rows;
+      const refs = [{ userId:req.userId, role:'admin' }, ...natilleraParticipants, ...participants];
       for (const ref of refs) {
         const userId = ref.userId ? Number(ref.userId) : null, guestId = ref.guestId ? Number(ref.guestId) : null;
         if ((!userId && !guestId) || (userId && guestId)) throw new Error('Participante inválido');
         if (guestId && !(await db.query('SELECT 1 FROM Guests WHERE id=$1 AND created_by=$2',[guestId,req.userId])).rowCount) throw new Error('Invitado inválido');
         await db.query('INSERT INTO ActivityParticipants(activity_id,user_id,guest_id,role) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[row.id,userId,guestId,ref.role || 'participant']);
       }
+      if(leaderUserId&&Number(leaderUserId)!==req.userId){const changed=await db.query("UPDATE ActivityParticipants SET role='responsible' WHERE activity_id=$1 AND user_id=$2",[row.id,Number(leaderUserId)]);if(!changed.rowCount)throw new Error('La persona líder debe participar en la actividad');}
       return row;
     });
     res.status(201).json(activity);

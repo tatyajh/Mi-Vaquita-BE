@@ -9,6 +9,7 @@ import {
   deactivateAccountController,
 } from '../controllers/users.controller.js';
 import { authenticateJWT } from '../middleware/auth.middleware.js';
+import { rateLimit } from '../middleware/rate-limit.middleware.js';
 
 const router = Router();
 
@@ -18,6 +19,6 @@ router.get("/search", authenticateJWT, searchUsersController);
 router.put('/me/password', authenticateJWT, changePasswordController);
 router.delete('/me', authenticateJWT, deactivateAccountController);
 router.get("/:id", getByIdUsersController);
-router.post('/', createUserController);
+router.post('/', rateLimit({ max: 10 }), createUserController);
 
 export default router;

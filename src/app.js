@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 // Side-effect import: runs the idempotent CREATE TABLE/ALTER TABLE
 // statements in migrations.js on boot. Nothing in the codebase
 // imported this file before, so none of its migrations (including
@@ -18,7 +19,11 @@ const app = express();
 await migrationsReady;
 const allowedOrigins = [process.env.FRONTEND_URL, ...(process.env.NODE_ENV === 'production' ? [] : ['http://localhost:3000','http://127.0.0.1:3000'])].filter(Boolean).map(x=>x.replace(/\/$/,''));
 app.use(cors({ origin(origin,callback){ if(!origin||allowedOrigins.includes(origin.replace(/\/$/,'')))return callback(null,true); callback(new Error('Origen no permitido por CORS')); } }));
-app.use(express.json());
+// crossOriginResourcePolicy en 'cross-origin': el frontend en otro origen
+// (mi-vaquita-fe.vercel.app) necesita poder leer las respuestas de esta API;
+// el default 'same-origin' de helmet las bloquearía.
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(express.json({ limit: '1mb' }));
 
 app.use((req, res, next) => {
   console.log(`Request: ${req.method} ${req.url}`);
