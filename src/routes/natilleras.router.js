@@ -7,6 +7,9 @@ router.use(authenticateJWT);
 const bad = (res, message, code = 400) => res.status(code).json({ message });
 const money = value => Math.round(Number(value) * 100) / 100;
 const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value || '') && !Number.isNaN(Date.parse(value));
+const monthDate=(value,months)=>{const source=value instanceof Date?value.toISOString().slice(0,10):String(value).slice(0,10);const [year,month,day]=source.split('-').map(Number);const target=new Date(Date.UTC(year,month-1+months,1));const last=new Date(Date.UTC(target.getUTCFullYear(),target.getUTCMonth()+1,0)).getUTCDate();target.setUTCDate(Math.min(day,last));return target.toISOString().slice(0,10);};
+const loanProgress=(loan,payments)=>{const capitalPaid=money(payments.reduce((sum,p)=>sum+Number(p.capital_amount??0),0));const interestPaid=money(payments.reduce((sum,p)=>sum+Number(p.interest_amount??0),0));const legacyPaid=money(payments.filter(p=>p.capital_amount==null&&p.interest_amount==null).reduce((sum,p)=>sum+Number(p.amount),0));const legacyCapital=Math.min(Math.max(0,Number(loan.principal)-capitalPaid),legacyPaid);const legacyInterest=Math.max(0,legacyPaid-legacyCapital);return {capitalPaid:money(capitalPaid+legacyCapital),interestPaid:money(interestPaid+legacyInterest),repaid:money(capitalPaid+interestPaid+legacyPaid),capitalPending:money(Math.max(0,Number(loan.principal)-capitalPaid-legacyCapital)),interestPending:money(Math.max(0,Number(loan.interest)-interestPaid-legacyInterest))};};
+const loanSchedule=(installments,repaid,today)=>{let applied=0;return installments.map(i=>{const due=money(Number(i.principal_due)+Number(i.interest_due)),paid=money(Math.min(due,Math.max(0,Number(repaid)-applied)));applied=money(applied+due);return {...i,due,paid,balance:money(due-paid),status:paid>=due?'paid':i.due_on<today?'overdue':paid>0?'partial':'pending'};});};
 
 async function context(client, id, userId, lock = false) {
   const { rows } = await client.query(`SELECT n.*,to_char(n.starts_on,'YYYY-MM-DD') AS starts_on,to_char(n.ends_on,'YYYY-MM-DD') AS ends_on, EXISTS(SELECT 1 FROM NatilleraMembers m WHERE m.natillera_id=n.id AND m.user_id=$2) AS member FROM Natilleras n WHERE n.id=$1 ${lock ? 'FOR UPDATE OF n' : ''}`, [id, userId]);
@@ -55,12 +58,16 @@ async function detail(client, n) {
     GROUP BY p.id,u.name,u.email,g.name,g.email,g.phone ORDER BY name`,[n.id])).rows;
   const contributions = (await client.query("SELECT c.*,to_char(c.due_on,'YYYY-MM-DD') AS due_on,u.name AS member_name FROM NatilleraContributions c JOIN Users u ON u.id=c.user_id WHERE c.natillera_id=$1 ORDER BY c.created_at DESC", [n.id])).rows;
   participants=participants.map(p=>({...p,recorded_contributed:money(p.recorded_contributed),contributed:money(Number(p.recorded_contributed)+(p.user_id?contributions.filter(c=>c.user_id===p.user_id).reduce((s,c)=>s+Number(c.amount),0):0))}));
-  const loans = (await client.query('SELECT l.*,u.name AS member_name,COALESCE(SUM(p.amount),0) AS repaid FROM NatilleraLoans l JOIN Users u ON u.id=l.user_id LEFT JOIN NatilleraLoanPayments p ON p.loan_id=l.id WHERE l.natillera_id=$1 GROUP BY l.id,u.name ORDER BY l.id DESC', [n.id])).rows;
+  const loanRows = (await client.query('SELECT l.*,u.name AS member_name,u.email,EXISTS(SELECT 1 FROM NatilleraMembers nm WHERE nm.natillera_id=l.natillera_id AND nm.user_id=l.user_id) is_member FROM NatilleraLoans l JOIN Users u ON u.id=l.user_id WHERE l.natillera_id=$1 ORDER BY l.id DESC', [n.id])).rows;
+  const loanPayments=loanRows.length?(await client.query('SELECT * FROM NatilleraLoanPayments WHERE loan_id=ANY($1::int[]) ORDER BY created_at,id',[loanRows.map(x=>x.id)])).rows:[];
+  const loanInstallments=loanRows.length?(await client.query("SELECT *,to_char(due_on,'YYYY-MM-DD') due_on FROM NatilleraLoanInstallments WHERE loan_id=ANY($1::int[]) ORDER BY loan_id,installment_number",[loanRows.map(x=>x.id)])).rows:[];
+  const today=new Date().toISOString().slice(0,10);
+  const loans=loanRows.map(l=>{const payments=loanPayments.filter(p=>p.loan_id===l.id),progress=loanProgress(l,payments),installments=loanInstallments.filter(i=>i.loan_id===l.id);return {...l,...progress,balance:money(progress.capitalPending+progress.interestPending),payments,installments,schedule:loanSchedule(installments,progress.repaid,today)};});
   const totalContributions = money(contributions.reduce((s, c) => s + Number(c.amount), 0));
   const totalLoans = money(loans.reduce((s, l) => s + Number(l.principal), 0));
   const totalRepayments = money(loans.reduce((s, l) => s + Number(l.repaid), 0));
-  const outstanding = money(loans.reduce((s, l) => s + Math.max(0, Number(l.principal) + Number(l.interest) - Number(l.repaid)), 0));
-  const collectedInterest = money(loans.reduce((s, l) => s + Math.max(0, Number(l.repaid) - Number(l.principal)), 0));
+  const outstanding = money(loans.reduce((s, l) => s + Number(l.balance), 0));
+  const collectedInterest = money(loans.reduce((s, l) => s + Number(l.interestPaid), 0));
   const ledger = (await client.query('SELECT * FROM NatilleraLedger WHERE natillera_id=$1 ORDER BY created_at DESC',[n.id])).rows;
   const quotas=(await client.query("SELECT q.*,to_char(q.due_on,'YYYY-MM-DD') due_on FROM NatilleraQuotas q WHERE q.natillera_id=$1 ORDER BY q.due_on,q.id",[n.id])).rows;
   const quotaPayments=(await client.query('SELECT participant_id,quota_id,COALESCE(SUM(amount),0) paid FROM NatilleraParticipantContributions WHERE natillera_id=$1 AND quota_id IS NOT NULL GROUP BY participant_id,quota_id',[n.id])).rows;
@@ -73,12 +80,22 @@ async function detail(client, n) {
     return { userId: m.id, name: m.name, dueOn: date, due, paid, balance: money(Math.max(0, due - paid)), status: paid >= due ? 'paid' : date < new Date().toISOString().slice(0,10) ? 'overdue' : paid > 0 ? 'partial' : 'pending' };
   }));
   const extendedContributions=money(participants.reduce((s,p)=>s+Number(p.recorded_contributed),0));
-  return { ...n, members, participants, contributions, loans: loans.map(l => ({ ...l, balance: money(Number(l.principal) + Number(l.interest) - Number(l.repaid)) })), ledger, quotas, schedule, participantSchedule, summary: { totalContributions:money(totalContributions+extendedContributions), legacyContributions:totalContributions, extendedContributions, totalLoans, totalRepayments, outstanding, collectedInterest, activityProfit, generalExpenses, estimatedProfit:money(collectedInterest+activityProfit-generalExpenses), available: money(totalContributions+extendedContributions-totalLoans+totalRepayments+activityProfit-generalExpenses) } };
+  return { ...n, members, participants, contributions, loans, ledger, quotas, schedule, participantSchedule, summary: { totalContributions:money(totalContributions+extendedContributions), legacyContributions:totalContributions, extendedContributions, totalLoans, totalRepayments, outstanding, collectedInterest, activityProfit, generalExpenses, estimatedProfit:money(collectedInterest+activityProfit-generalExpenses), available: money(totalContributions+extendedContributions-totalLoans+totalRepayments+activityProfit-generalExpenses) } };
 }
 
 router.get('/', async (req, res) => {
   const { rows } = await pool.query("SELECT DISTINCT n.*,to_char(n.starts_on,'YYYY-MM-DD') AS starts_on,to_char(n.ends_on,'YYYY-MM-DD') AS ends_on FROM Natilleras n JOIN NatilleraMembers m ON m.natillera_id=n.id WHERE m.user_id=$1 ORDER BY n.created_at DESC", [req.userId]);
   res.json(rows);
+});
+router.get('/loans/mine',async(req,res)=>{
+  const loans=(await pool.query(`SELECT l.*,n.name natillera_name,u.name borrower_name,EXISTS(SELECT 1 FROM NatilleraMembers nm WHERE nm.natillera_id=l.natillera_id AND nm.user_id=l.user_id) is_member
+    FROM NatilleraLoans l JOIN Natilleras n ON n.id=l.natillera_id JOIN Users u ON u.id=l.user_id
+    WHERE l.user_id=$1 ORDER BY l.issued_on DESC,l.id DESC`,[req.userId])).rows;
+  const ids=loans.map(x=>x.id);
+  const payments=ids.length?(await pool.query('SELECT * FROM NatilleraLoanPayments WHERE loan_id=ANY($1::int[]) ORDER BY created_at,id',[ids])).rows:[];
+  const installments=ids.length?(await pool.query("SELECT *,to_char(due_on,'YYYY-MM-DD') due_on FROM NatilleraLoanInstallments WHERE loan_id=ANY($1::int[]) ORDER BY loan_id,installment_number",[ids])).rows:[];
+  const today=new Date().toISOString().slice(0,10);
+  res.json(loans.map(loan=>{const ownPayments=payments.filter(p=>p.loan_id===loan.id),progress=loanProgress(loan,ownPayments),schedule=loanSchedule(installments.filter(i=>i.loan_id===loan.id),progress.repaid,today);return {...loan,...progress,balance:money(progress.capitalPending+progress.interestPending),isExternal:!(loan.is_member),payments:ownPayments,schedule};}));
 });
 router.post('/', async (req, res) => {
   const { name, purpose=null, startsOn, endsOn, frequency, contribution, participantIds = [], guestIds = [], profitDistribution='proportional', lateFee=0 } = req.body;
@@ -153,16 +170,26 @@ router.get('/:id/audit', async (req,res) => {
 });
 router.post('/:id/loans', async (req,res) => {
   const { userId, principal, annualRate, termMonths } = req.body;
-  if (![principal,annualRate,termMonths].every(v => Number.isFinite(Number(v))) || Number(principal)<=0 || Number(annualRate)<0 || !Number.isInteger(Number(termMonths)) || Number(termMonths)<1) return bad(res,'Préstamo inválido');
+  if (!Number.isInteger(Number(userId)) || Number(userId)<1 || ![principal,annualRate,termMonths].every(v => Number.isFinite(Number(v))) || Number(principal)<=0 || Number(annualRate)<0 || !Number.isInteger(Number(termMonths)) || Number(termMonths)<1) return bad(res,'Préstamo inválido');
   try {
     const row = await transaction(async client => {
       const n=await context(client,req.params.id,req.userId,true);
       if (!n || n.owner_id!==req.userId || n.status!=='active') throw new Error('No puedes crear este préstamo');
       const d=await detail(client,n);
       if (Number(principal)>d.summary.available) throw new Error('El préstamo supera el dinero disponible');
-      if (!d.members.some(m=>m.id===Number(userId))) throw new Error('Participante inválido');
+      const borrower=(await client.query('SELECT id FROM Users WHERE id=$1 AND deleted_at IS NULL',[Number(userId)])).rows[0];
+      if(!borrower)throw new Error('El prestatario debe tener una cuenta activa en Mi Vaquita');
       const interest=money(Number(principal)*Number(annualRate)/100*Number(termMonths)/12);
-      return (await client.query('INSERT INTO NatilleraLoans(natillera_id,user_id,principal,annual_rate,term_months,interest,created_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',[n.id,userId,money(principal),annualRate,termMonths,interest,req.userId])).rows[0];
+      const loan=(await client.query('INSERT INTO NatilleraLoans(natillera_id,user_id,principal,annual_rate,term_months,interest,created_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',[n.id,userId,money(principal),annualRate,termMonths,interest,req.userId])).rows[0];
+      let principalAssigned=0,interestAssigned=0;
+      for(let installment=1;installment<=Number(termMonths);installment++){
+        const principalDue=installment===Number(termMonths)?money(Number(principal)-principalAssigned):money(Number(principal)/Number(termMonths));
+        const interestDue=installment===Number(termMonths)?money(interest-interestAssigned):money(interest/Number(termMonths));
+        principalAssigned=money(principalAssigned+principalDue);interestAssigned=money(interestAssigned+interestDue);
+        await client.query('INSERT INTO NatilleraLoanInstallments(loan_id,installment_number,due_on,principal_due,interest_due) VALUES($1,$2,$3,$4,$5)',[loan.id,installment,monthDate(loan.issued_on,installment),principalDue,interestDue]);
+      }
+      await client.query("INSERT INTO AuditLog(actor_user_id,scope_type,scope_id,action,after_data) VALUES($1,'loan',$2,'loan_created',$3)",[req.userId,loan.id,JSON.stringify({natilleraId:n.id,borrowerUserId:Number(userId),external:!d.members.some(m=>m.id===Number(userId)),principal:money(principal),interest})]);
+      return loan;
     }); res.status(201).json(row);
   } catch(error) { bad(res,error.message); }
 });
@@ -175,7 +202,10 @@ router.post('/:id/loans/:loanId/payments', async(req,res) => {
       if (!n||n.owner_id!==req.userId||n.status!=='active') throw new Error('No puedes registrar este abono');
       const d=await detail(client,n), loan=d.loans.find(l=>l.id===Number(req.params.loanId));
       if (!loan||amount>loan.balance) throw new Error('El abono supera el saldo del préstamo');
-      return (await client.query('INSERT INTO NatilleraLoanPayments(loan_id,amount,recorded_by) VALUES($1,$2,$3) RETURNING *',[loan.id,amount,req.userId])).rows[0];
+      const interestAmount=money(Math.min(amount,Number(loan.interestPending))),capitalAmount=money(amount-interestAmount);
+      const payment=(await client.query('INSERT INTO NatilleraLoanPayments(loan_id,amount,capital_amount,interest_amount,recorded_by) VALUES($1,$2,$3,$4,$5) RETURNING *',[loan.id,amount,capitalAmount,interestAmount,req.userId])).rows[0];
+      await client.query("INSERT INTO AuditLog(actor_user_id,scope_type,scope_id,action,after_data) VALUES($1,'loan',$2,'loan_payment_recorded',$3)",[req.userId,loan.id,JSON.stringify(payment)]);
+      return payment;
     });res.status(201).json(row);
   } catch(error){bad(res,error.message);}
 });
