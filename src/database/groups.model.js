@@ -74,20 +74,20 @@ const GroupsModel = () => {
     return result.rows[0];
   };
 
+  // Antes eran 7 DELETE secuenciales SIN transacción (autocommit cada
+  // uno por separado): si alguno fallaba a mitad de camino (ej. se cae
+  // la conexión), quedaban hijos ya borrados con el grupo todavía en
+  // pie, o viceversa — un borrado parcial real (lo confirmó una
+  // auditoría externa). El comentario original decía que envolver esto
+  // en una transacción había colgado una conexión antes, pero eso
+  // pasaba por no liberar el client en el `catch` del ROLLBACK — el
+  // patrón de abajo (BEGIN/COMMIT/ROLLBACK con `finally` para el
+  // release) es el mismo que ya usan natilleras/activities/community
+  // sin ese problema.
   const deleteGroupsModel = async (id) => {
     const client = await pool.connect();
     try {
-      // Borrar primero lo que depende del grupo por foreign key
-      // (Expenses, GroupParticipants) — si no, el DELETE de Groups
-      // viola la constraint apenas el grupo tiene un gasto o un
-      // participante (que ahora siempre incluye al menos al dueño).
-      // Deletes secuenciales sin BEGIN/COMMIT explícito a propósito:
-      // envolverlos en una transacción manual con este pool compartido
-      // (serverless) dejó una conexión "colgada" a medio-transacción si
-      // el ROLLBACK fallaba al liberar el client, tumbando CUALQUIER
-      // query posterior que reusara esa misma conexión del pool con un
-      // 500 genérico — bug real que se vio en vivo. Cada DELETE por su
-      // cuenta ya es atómico por sí mismo en Postgres (autocommit).
+      await client.query('BEGIN');
       await client.query('DELETE FROM ActivityExclusions WHERE activity_id IN (SELECT id FROM Activities WHERE group_id=$1)', [id]);
       await client.query('DELETE FROM ActivityWinners WHERE activity_id IN (SELECT id FROM Activities WHERE group_id=$1)', [id]);
       await client.query('DELETE FROM ActivityMembers WHERE activity_id IN (SELECT id FROM Activities WHERE group_id=$1)', [id]);
@@ -95,21 +95,41 @@ const GroupsModel = () => {
       await client.query('DELETE FROM Expenses WHERE group_id = $1', [id]);
       await client.query('DELETE FROM GroupParticipants WHERE group_id = $1', [id]);
       const result = await client.query('DELETE FROM Groups WHERE id = $1', [id]);
+      await client.query('COMMIT');
       return result.rowCount >= 1;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
     } finally {
       client.release();
     }
   };
 
-  const addParticipants = async (groupId, participantIds) => {
+  // El cupo máximo se valida ACÁ, con la fila del grupo bloqueada
+  // (FOR UPDATE) dentro de una transacción — antes se contaba a los
+  // integrantes existentes en una consulta y se insertaba en otra por
+  // separado, sin nada que impidiera que dos solicitudes para agregar
+  // gente al mismo grupo casi al mismo tiempo pasaran el chequeo cada
+  // una por su lado y sumaran más del máximo entre las dos (condición
+  // de carrera real, reportada por una auditoría externa).
+  const addParticipants = async (groupId, participantIds, maxMembers) => {
     const client = await pool.connect();
     try {
-      const existingParticipantsQuery = `SELECT user_id FROM GroupParticipants WHERE group_id = $1 AND user_id = ANY($2::int[])`;
-      const existingParticipantsResult = await client.query(existingParticipantsQuery, [groupId, participantIds]);
-  
-      const existingParticipantIds = existingParticipantsResult.rows.map(row => row.user_id);
-      const newParticipantIds = participantIds.filter(id => !existingParticipantIds.includes(id));
-  
+      await client.query('BEGIN');
+      const { rows: groupRows } = await client.query('SELECT owneruserid FROM Groups WHERE id = $1 FOR UPDATE', [groupId]);
+      const group = groupRows[0];
+      const { rows: existingRows } = await client.query('SELECT user_id FROM GroupParticipants WHERE group_id = $1', [groupId]);
+      const existingIds = new Set(existingRows.map(r => r.user_id));
+      if (group) existingIds.add(group.owneruserid);
+
+      const newParticipantIds = participantIds.filter(id => !existingIds.has(id));
+      const totalMembers = existingIds.size + newParticipantIds.length;
+      if (totalMembers > maxMembers) {
+        const error = new Error(`Un grupo puede tener como máximo ${maxMembers} integrantes (actualmente tendría ${totalMembers})`);
+        error.statusCode = 409;
+        throw error;
+      }
+
       if (newParticipantIds.length > 0) {
         await client.query(
           `INSERT INTO GroupParticipants (group_id, user_id)
@@ -118,6 +138,10 @@ const GroupsModel = () => {
           [groupId, newParticipantIds]
         );
       }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
     } finally {
       client.release();
     }

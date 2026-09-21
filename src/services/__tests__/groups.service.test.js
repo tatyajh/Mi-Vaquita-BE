@@ -117,4 +117,24 @@ describe('groups.service authorization', () => {
     getMembershipModel.mockResolvedValue({ isMember: true, isOwner: false });
     await expect(groupService.addParticipants(1, [3], 2)).rejects.toMatchObject({ statusCode: 403 });
   });
+
+  // El conteo contra el cupo máximo vive ahora en el modelo (con la
+  // fila del grupo bloqueada), no en el servicio, para cerrar una
+  // condición de carrera donde dos altas simultáneas al mismo grupo
+  // podían pasar el chequeo cada una por su lado. El servicio solo
+  // debe traducir el error del modelo a un ConflictException (409).
+  it('addParticipants wraps a capacity error from the model into a ConflictException', async () => {
+    getMembershipModel.mockResolvedValue({ isMember: true, isOwner: true });
+    const capacityError = new Error('Un grupo puede tener como máximo 20 integrantes (actualmente tendría 21)');
+    capacityError.statusCode = 409;
+    addParticipantsModel.mockRejectedValueOnce(capacityError);
+    await expect(groupService.addParticipants(1, [3], 1)).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('addParticipants passes deduplicated ids and the max through to the model', async () => {
+    getMembershipModel.mockResolvedValue({ isMember: true, isOwner: true });
+    addParticipantsModel.mockResolvedValueOnce();
+    await groupService.addParticipants(1, [3, 3, 4], 1);
+    expect(addParticipantsModel).toHaveBeenCalledWith(1, [3, 4], 20);
+  });
 });

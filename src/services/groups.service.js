@@ -110,20 +110,20 @@ const GroupService = () => {
       throw new NotFoundException(`Group with id ${groupId} does not exist`);
     }
     await assertOwner(groupId, actorUserId);
-    const existingParticipants = await groupModel.getParticipants(groupId);
 
-    const existingIds = new Set(existingParticipants.map(p => p.id));
-    existingIds.add(group.owneruserid ?? group.ownerUserId);
-    const newIds = [...new Set(participantIds)].filter(id => !existingIds.has(id));
-    const totalMembers = existingIds.size + newIds.length;
-
-    if (totalMembers > MAX_GROUP_MEMBERS) {
-      throw new ConflictException(
-        `Un grupo puede tener como máximo ${MAX_GROUP_MEMBERS} integrantes (actualmente tendría ${totalMembers})`
-      );
+    // El conteo contra el cupo máximo pasa DENTRO de
+    // groupModel.addParticipants, con la fila del grupo bloqueada —
+    // antes se contaba acá y se insertaba en el modelo por separado,
+    // dejando una ventana para que dos altas simultáneas al mismo
+    // grupo se saltaran el límite entre las dos.
+    try {
+      await groupModel.addParticipants(groupId, [...new Set(participantIds)], MAX_GROUP_MEMBERS);
+    } catch (error) {
+      if (error.statusCode === 409) {
+        throw new ConflictException(error.message);
+      }
+      throw error;
     }
-
-    return groupModel.addParticipants(groupId, newIds);
   };
 
   const getParticipants = async (groupId, userId) => {
