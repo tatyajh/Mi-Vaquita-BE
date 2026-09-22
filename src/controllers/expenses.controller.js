@@ -18,9 +18,9 @@ export const getExpensesByGroupController = async (req, res) => {
 };
 
 export const createExpenseController = async (req, res) => {
-  const { groupId, paidByUserId, description, amount, receiptUrl, paymentMethod, category } = req.body;
+  const { groupId, paidByUserId, paidByName, description, amount, receiptUrl, paymentMethod, category } = req.body;
   try {
-    const expense = await expensesService.create({ groupId, paidByUserId, description, amount, receiptUrl, paymentMethod, category }, req.userId);
+    const expense = await expensesService.create({ groupId, paidByUserId, paidByName, description, amount, receiptUrl, paymentMethod, category }, req.userId);
     res.status(StatusCodes.CREATED).json(expense);
   } catch (error) {
     if (error.statusCode) {

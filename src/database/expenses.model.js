@@ -7,9 +7,10 @@ const ExpensesModel = () => {
       const result = await client.query(
         `SELECT e.id, e.group_id, e.paid_by_user_id, e.description, e.amount, e.createdat, e.receipt_url,
                 e.payment_method, e.category,
-                u.name AS paid_by_name, u.email AS paid_by_email
+                COALESCE(u.name, e.paid_by_name) AS paid_by_name, u.email AS paid_by_email,
+                (u.id IS NULL) AS paid_by_unregistered
          FROM Expenses e
-         JOIN Users u ON e.paid_by_user_id = u.id
+         LEFT JOIN Users u ON e.paid_by_user_id = u.id
          WHERE e.group_id = $1
          ORDER BY e.createdat DESC`,
         [groupId]
@@ -24,11 +25,12 @@ const ExpensesModel = () => {
     const client = await pool.connect();
     try {
       const result = await client.query(
-        `INSERT INTO Expenses (group_id, paid_by_user_id, description, amount, receipt_url, payment_method, category, createdAt)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW()) RETURNING *`,
+        `INSERT INTO Expenses (group_id, paid_by_user_id, paid_by_name, description, amount, receipt_url, payment_method, category, createdAt)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW()) RETURNING *`,
         [
           data.groupId,
-          data.paidByUserId,
+          data.paidByUserId ?? null,
+          data.paidByName ?? null,
           data.description,
           data.amount,
           data.receiptUrl ?? null,

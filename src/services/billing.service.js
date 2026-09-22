@@ -75,7 +75,16 @@ const createCheckoutSession = async (userId) => {
   return { url: `${WOMPI_CHECKOUT_URL}?${params.toString()}` };
 };
 
+// Interruptor temporal para dejar que todo el mundo pruebe las
+// funciones Pro mientras se termina de validar el producto — se quita
+// solo con esta variable de entorno, sin tocar la lógica de cobro real
+// ni las suscripciones ya guardadas.
+const proForAllEnabled = () => process.env.PRO_FOR_ALL === 'true';
+
 const getStatus = async (userId) => {
+  if (proForAllEnabled()) {
+    return { isPro: true, status: 'active', currentPeriodEnd: null };
+  }
   const subscription = await subscriptionsModel.getByUserIdModel(userId);
   const isPro = Boolean(
     subscription

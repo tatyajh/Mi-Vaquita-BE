@@ -133,11 +133,27 @@ describe('expenses.service authorization', () => {
     expect(createExpenseModel).not.toHaveBeenCalled();
   });
 
-  it('create rejects attributing the expense to a non-member payer', async () => {
-    getMembershipModel.mockImplementation(async (groupId, userId) => ({ isMember: userId !== 5, isOwner: false }));
+  // Un miembro solo puede anotar lo que ÉL pagó — atribuirle el pago a
+  // OTRO usuario registrado (así también sea del grupo) sin su
+  // consentimiento no es válido; la única forma de anotar un pago hecho
+  // por alguien más es como persona no registrada (paidByName).
+  it('create rejects attributing the expense to another registered member, even one in the group', async () => {
+    getMembershipModel.mockResolvedValue({ isMember: true, isOwner: false });
     await expect(expensesService.create({ groupId: 1, paidByUserId: 5, description: 'Almuerzo', amount: 10 }, 1))
-      .rejects.toThrow('debe ser parte del grupo');
+      .rejects.toThrow('Solo puedes registrar gastos que tú mismo pagaste');
     expect(createExpenseModel).not.toHaveBeenCalled();
+  });
+
+  it('create allows a member to log an expense they paid themselves', async () => {
+    getMembershipModel.mockResolvedValue({ isMember: true, isOwner: false });
+    await expensesService.create({ groupId: 1, paidByUserId: 1, description: 'Almuerzo', amount: 10 }, 1);
+    expect(createExpenseModel).toHaveBeenCalledWith(expect.objectContaining({ paidByUserId: 1, paidByName: null }));
+  });
+
+  it('create allows naming a non-registered payer instead of picking a member', async () => {
+    getMembershipModel.mockResolvedValue({ isMember: true, isOwner: false });
+    await expensesService.create({ groupId: 1, paidByName: '  Mamá  ', description: 'Almuerzo', amount: 10 }, 1);
+    expect(createExpenseModel).toHaveBeenCalledWith(expect.objectContaining({ paidByUserId: null, paidByName: 'Mamá' }));
   });
 
   it('remove rejects a requester outside the expense\'s group', async () => {

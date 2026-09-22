@@ -24,7 +24,11 @@ const ExpensesService = () => {
     return expensesModel.getAllByGroupModel(groupId);
   };
 
-  const create = async ({ groupId, paidByUserId, description, amount, receiptUrl, paymentMethod, category }, requesterUserId) => {
+  // Un usuario registrado solo puede anotar gastos que ÉL mismo pagó —
+  // no puede atribuirle el pago a otro miembro registrado sin su
+  // consentimiento. Si quien pagó de verdad no quiere registrarse,
+  // paidByName guarda su nombre en vez de un id de usuario.
+  const create = async ({ groupId, paidByUserId, paidByName, description, amount, receiptUrl, paymentMethod, category }, requesterUserId) => {
     if (!description || !description.trim()) {
       throw new Error('La descripción es obligatoria');
     }
@@ -33,13 +37,22 @@ const ExpensesService = () => {
       throw new Error('El monto debe ser mayor a cero');
     }
     await assertGroupMember(groupId, requesterUserId);
-    const payer = await groupsModel.getMembershipModel(groupId, paidByUserId);
-    if (!payer.isMember) {
-      throw new Error('La persona que pagó debe ser parte del grupo');
+
+    const trimmedName = paidByName?.trim();
+    let payerUserId = null;
+    let payerName = null;
+    if (trimmedName) {
+      payerName = trimmedName;
+    } else if (String(paidByUserId) === String(requesterUserId)) {
+      payerUserId = requesterUserId;
+    } else {
+      throw new Error('Solo puedes registrar gastos que tú mismo pagaste. Si pagó otra persona que no está registrada, escribe su nombre.');
     }
+
     return expensesModel.createExpenseModel({
       groupId,
-      paidByUserId,
+      paidByUserId: payerUserId,
+      paidByName: payerName,
       description: description.trim(),
       amount: parsedAmount,
       receiptUrl: receiptUrl || null,

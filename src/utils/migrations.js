@@ -85,6 +85,15 @@ const queries = [
   `ALTER TABLE Expenses ADD COLUMN IF NOT EXISTS payment_method VARCHAR(20);`,
   // Categoría manual del gasto (comida, transporte, hospedaje, etc.).
   `ALTER TABLE Expenses ADD COLUMN IF NOT EXISTS category VARCHAR(30);`,
+  // Un usuario registrado solo puede anotar gastos que ÉL pagó, pero la
+  // persona que de verdad pagó puede no querer registrarse (ej. un
+  // familiar). paid_by_name guarda su nombre en ese caso, en vez de
+  // permitir que cualquier miembro le atribuya el pago a OTRO usuario
+  // registrado sin su consentimiento.
+  `ALTER TABLE Expenses ALTER COLUMN paid_by_user_id DROP NOT NULL;`,
+  `ALTER TABLE Expenses ADD COLUMN IF NOT EXISTS paid_by_name VARCHAR(100);`,
+  `ALTER TABLE Expenses DROP CONSTRAINT IF EXISTS expenses_payer_check;`,
+  `ALTER TABLE Expenses ADD CONSTRAINT expenses_payer_check CHECK ((paid_by_user_id IS NOT NULL)::int + (paid_by_name IS NOT NULL)::int = 1);`,
   // Tipo de paseo del grupo (playa, montaña, ciudad...), usado para
   // filtrar los consejos de ahorro contextuales.
   `ALTER TABLE Groups ADD COLUMN IF NOT EXISTS trip_type VARCHAR(30);`,
