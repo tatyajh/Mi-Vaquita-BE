@@ -3,13 +3,13 @@ import pool from "../lib/connection.js";
 import { encryptDeliveryUrl } from './private-url.crypto.js';
 
 const SEED_USERS = [
-  { name: 'miguel', email: 'miguel@gmail.com', createdAt: '2023-01-02' },
-  { name: 'juan camilo', email: 'juancamilo@gmail.com', createdAt: '2024-03-14' },
-  { name: 'mateo', email: 'mateo@gmail.com', createdAt: '2024-04-18' },
-  { name: 'carolina', email: 'carolina@gmail.com', createdAt: '2024-08-22' },
-  { name: 'liliana', email: 'liliana@gmail.com', createdAt: '2024-08-22' },
-  { name: 'césar', email: 'cesar@gmail.com', createdAt: '2024-09-22' },
-  { name: 'hernán', email: 'hernan@gmail.com', createdAt: '2024-12-01' },
+  { name: 'demo uno', email: 'user1@example.com', createdAt: '2023-01-02' },
+  { name: 'demo dos', email: 'user2@example.com', createdAt: '2024-03-14' },
+  { name: 'demo tres', email: 'user3@example.com', createdAt: '2024-04-18' },
+  { name: 'demo cuatro', email: 'user4@example.com', createdAt: '2024-08-22' },
+  { name: 'demo cinco', email: 'user5@example.com', createdAt: '2024-08-22' },
+  { name: 'demo seis', email: 'user6@example.com', createdAt: '2024-09-22' },
+  { name: 'demo siete', email: 'user7@example.com', createdAt: '2024-12-01' },
 ];
 
 const queries = [
@@ -239,8 +239,8 @@ const queries = [
   );`,
 ];
 
-// Los grupos referencian usuarios por posición (1 = miguel, 2 = juan
-// camilo, ...), así que los usuarios se insertan antes y en este
+// Los grupos referencian usuarios por posición (1 = demo uno, 2 = demo dos
+// ...), así que los usuarios se insertan antes y en este
 // mismo orden.
 const GROUP_SEED_QUERY = `INSERT INTO Groups (name, color, ownerUserId, createdAt) VALUES
   ('Los 4 babies', '#FF5733', 2, '2023-03-14'),
@@ -267,7 +267,7 @@ async function runMigrations() {
   // desarrollo local. Nunca deben insertarse automáticamente en
   // producción ni en ningún ambiente por defecto: hay que pedirlo
   // explícitamente con SEED_DEMO_DATA=true. Esto es lo que evita que
-  // vuelvan a aparecer usuarios/grupos hardcodeados (p.ej. "miguel",
+  // vuelvan a aparecer usuarios/grupos hardcodeados (p.ej. "demo uno",
   // "Los 4 babies", "Paseo san andrés", etc.) después de borrarlos.
   const shouldSeed = process.env.SEED_DEMO_DATA === 'true' && process.env.NODE_ENV !== 'production';
   if (shouldSeed) {
